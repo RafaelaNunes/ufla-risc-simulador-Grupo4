@@ -1,356 +1,170 @@
-# src/simulador/cpu.py
-# Pipeline 5 estágios: IF - ID - EX - MEM - WB
-# Sem hazard detection nem forwarding. Simples e determinístico.
-from src.simulador.registers import create_registers, write_reg, read_reg
-from src.simulador.instruction import (
-    get_opcode, get_ra, get_rb, get_rc,
-    get_const16_high, get_const16_low, get_jump_address
-)
-from src.simulador.memory import MEMORY_SIZE_WORDS
+# cpu.py
+# cpu.py (Corrigido)
 
-HALT_INSTRUCTION = 0xFFFFFFFF
-
-def bubble():
-    """Cria uma instrução bolha (NOP) para o pipeline."""
-    return {
-        "ir": 0,
-        "opcode": 0,
-        "ra": 0,
-        "rb": 0,
-        "rc": 0,
-        "const_high": 0,
-        "const_low": 0,
-        "jump_addr": 0,
-        "valid": False
-    }
+# Importações relativas corrigidas:
+from src.simulador.registers import create_registers, read_reg, write_reg, print_registers
+from src.simulador.memory import create_memory, read_mem, write_mem, load_instruction_mem, print_memory_data
+from src.simulador.instruction import Instruction 
+# ... (Resto da classe CPU)
 
 class CPU:
-    def __init__(self, memory):
-        self.memory = memory
-        self.registers = create_registers()
-        self.pc = 0
-        self.halted = False
-
-        # flags do processador
-        self.flag_neg = 0
-        self.flag_zero = 0
-        self.flag_carry = 0
-        self.flag_overflow = 0
-
-        # Registradores de Pipeline (iniciam como bolhas)
-        self.IF_ID = bubble()
-        self.ID_EX = bubble()
-        self.EX_MEM = bubble()
-        self.MEM_WB = bubble()
-
-        # Metadados de debug
-        self.ir = 0
-        self.cycle = 0
-
-    # Funções auxiliares
-    def update_flags(self, value):
-        """Atualiza as flags Z e N com base no valor de 32 bits."""
-        val = value & 0xFFFFFFFF
-        self.flag_zero = 1 if val == 0 else 0
-        self.flag_neg = 1 if ((val >> 31) & 1) else 0
-        return val
-
-    def reg(self, idx):
-        """Lê um registrador, aplicando máscara no índice."""
-        return read_reg(self.registers, idx & 0x1F)
-
-    def decode_ir(self, ir):
-        """Decodifica uma instrução (IR) em seus campos."""
-        return {
-            "ir": ir,
-            "opcode": get_opcode(ir),
-            "ra": get_ra(ir),
-            "rb": get_rb(ir),
-            "rc": get_rc(ir),
-            "const_high": get_const16_high(ir),
-            "const_low": get_const16_low(ir),
-            "jump_addr": get_jump_address(ir),
-            "valid": True
-        }
-
-    # Estágio IF (Instruction Fetch)
-    def IF(self):
-        if not (0 <= self.pc < MEMORY_SIZE_WORDS):
-            self.halted = True
-            return
-        ir = self.memory[self.pc]
-        self.ir = ir
-        self.IF_ID = self.decode_ir(ir)
-        self.IF_ID["pc"] = self.pc
-        self.pc += 1
+    """
+    Simulador da Unidade Central de Processamento (CPU) UFLA-RISC, 
+    implementando um pipeline de 5 estágios.
+    """
+    def __init__(self, instruction_memory: dict, data_memory_list: list, initial_pc: int = 0):
+        # ----------------------------------------
+        # ESTADO PRINCIPAL
+        # ----------------------------------------
+        self.PC = initial_pc 
+        self.registers = data_memory_list
+        self.data_memory = data_memory_list
+        # A memória de instruções é um dicionário Endereço -> Binário (carregado pelo driver)
+        self.instruction_memory = instruction_memory 
         
-        # Detecção de HALT antecipada
-        if ir == HALT_INSTRUCTION:
-             self.halted = True
+        # ----------------------------------------
+        # REGISTRADORES DE PIPELINE (LATCHeS)
+        # Inicializados como NOPs (valores zerados)
+        # Estrutura: Dicionários para carregar o conteúdo de cada latch
+        # ----------------------------------------
+        self.IF_ID = {'PC_Next': 0, 'Instruction': '0'*32}
+        self.ID_EX = {'PC_Next': 0, 'Read_Data_1': 0, 'Read_Data_2': 0, 'Immediate': 0, 
+                      'Rt': 0, 'Rd': 0, 'Control_Signals': {}}
+        self.EX_MEM = {'ALU_Result': 0, 'Write_Data': 0, 'Mem_Address': 0, 
+                       'Rd': 0, 'Control_Signals': {}}
+        self.MEM_WB = {'ALU_Result': 0, 'Mem_Read_Data': 0, 
+                       'Rd': 0, 'Control_Signals': {}}
 
-    # Estágio ID (Instruction Decode)
-    def ID(self):
-        if not self.IF_ID.get("valid", False):
-            self.ID_EX = bubble()
-            return
+        # ----------------------------------------
+        # CONTADORES E CONTROLE
+        # ----------------------------------------
+        self.clock_cycle = 0
+        self.running = True
+
+    # ----------------------------------------
+    # ESTÁGIOS DO PIPELINE
+    # ----------------------------------------
+
+    def fetch(self):
+        """Estágio IF: Busca a Instrução."""
+        if not self.running: return
+
+        # 1. Lê a string binária da memória de instruções (ou retorna NOP)
+        instruction_binary = self.instruction_memory.get(self.PC, '0'*32)
         
-        # Cria o registrador de pipeline ID_EX
-        dec = {
-            "ir": self.IF_ID["ir"],
-            "opcode": self.IF_ID["opcode"],
-            "ra": self.IF_ID["ra"],
-            "rb": self.IF_ID["rb"],
-            "rc": self.IF_ID["rc"],
-            "const_high": self.IF_ID["const_high"],
-            "const_low": self.IF_ID["const_low"],
-            "jump_addr": self.IF_ID["jump_addr"],
-            "pc": self.IF_ID.get("pc", 0),
-            "valid": True
-        }
+        # 2. Atualiza o registrador IF/ID
+        self.IF_ID['PC_Next'] = self.PC + 4
+        self.IF_ID['Instruction'] = instruction_binary
         
-        # Leitura do Arquivo de Registradores
-        dec["reg_ra_val"] = self.reg(dec["ra"])
-        dec["reg_rb_val"] = self.reg(dec["rb"])
-        self.ID_EX = dec
+        # 3. Atualiza o PC para o ciclo seguinte (salto/branch será tratado na fase EX/MEM)
+        # Se for um Branch ou Jump, o PC será sobrescrito em EX ou MEM
+        self.PC += 4
 
-    # Estágio EX (Execute)
-    def EX(self):
-        if not self.ID_EX.get("valid", False):
-            self.EX_MEM = bubble()
-            return
+    def decode(self):
+        """Estágio ID: Decodifica a Instrução e Lê Registradores."""
+        if not self.running: return
 
-        opcode = self.ID_EX["opcode"]
-        a_val = self.ID_EX.get("reg_ra_val", 0)
-        b_val = self.ID_EX.get("reg_rb_val", 0)
-        rc = self.ID_EX["rc"]
-        const_high = self.ID_EX["const_high"]
-        const_low = self.ID_EX["const_low"]
-        jump_addr = self.ID_EX["jump_addr"]
-        pc_of_inst = self.ID_EX.get("pc", 0)
-
-        exec_result = None
-        exec_rc = rc # O registrador destino é, por padrão, RC
+        # 1. Pega a instrução do latch IF/ID
+        instruction_binary = self.IF_ID['Instruction']
         
-        # Lógica de Execução
+        # Se for NOP, não faz nada (mantém os valores zero/NOP no ID_EX)
+        if instruction_binary == '0'*32:
+            return 
         
-        # 1. ALU (ADD, SUB, ZERO, XOR, OR, AND)
-        if opcode == 1:  # ADD
-            res = (a_val + b_val) & 0xFFFFFFFF
-            self.flag_carry = 1 if (a_val + b_val) > 0xFFFFFFFF else 0
-            sa, sb, sr = (a_val >> 31) & 1, (b_val >> 31) & 1, (res >> 31) & 1
-            self.flag_overflow = 1 if (sa == sb and sa != sr) else 0
-            exec_result = self.update_flags(res)
-        elif opcode == 2:  # SUB
-            res = (a_val - b_val) & 0xFFFFFFFF
-            self.flag_carry = 1 if a_val >= b_val else 0
-            sa, sb, sr = (a_val >> 31) & 1, (b_val >> 31) & 1, (res >> 31) & 1
-            self.flag_overflow = 1 if (sa != sb and sa != sr) else 0
-            exec_result = self.update_flags(res)
-        elif opcode == 3:  # ZERO
-            exec_result = self.update_flags(0)
-            self.flag_zero = 1
-        elif opcode == 4:  # XOR
-            res = (a_val ^ b_val) & 0xFFFFFFFF
-            exec_result = self.update_flags(res)
-        elif opcode == 5:  # OR
-            res = (a_val | b_val) & 0xFFFFFFFF
-            exec_result = self.update_flags(res)
-        elif opcode == 7:  # AND
-            res = (a_val & b_val) & 0xFFFFFFFF
-            exec_result = self.update_flags(res)
-
-        # 2. Shifts
-        elif opcode == 16:  # ASL
-            shift = b_val & 31
-            wide = (a_val << shift) & 0xFFFFFFFFFFFFFFFF
-            res = wide & 0xFFFFFFFF
-            exec_result = self.update_flags(res)
-            self.flag_carry = 1 if (wide >> 32) & 1 else 0
-        elif opcode == 17:  # ASR (Shift Aritmético para a Direita)
-            shift = b_val & 31
-            if a_val & 0x80000000:
-                # Simula o comportamento de signed shift
-                signed = a_val - (1 << 32)
-                res = (signed >> shift) & 0xFFFFFFFF
-            else:
-                res = (a_val >> shift) & 0xFFFFFFFF
-            exec_result = self.update_flags(res)
-        elif opcode == 18:  # LSL
-            shift = b_val & 31
-            wide = (a_val << shift) & 0xFFFFFFFFFFFFFFFF
-            res = wide & 0xFFFFFFFF
-            exec_result = self.update_flags(res)
-            self.flag_carry = 1 if (wide >> 32) & 1 else 0
-        elif opcode == 19:  # LSR
-            shift = b_val & 31
-            res = (a_val >> shift) & 0xFFFFFFFF
-            exec_result = self.update_flags(res)
-
-        # 3. CONSTS
-        elif opcode == 20:  # LCLH (Load Constant High)
-            # LCLH: Carrega nos 16 bits altos
-            high = (const_high & 0xFFFF) << 16
-            low = self.reg(rc) & 0xFFFF # Mantém os 16 bits baixos
-            res = (high | low) & 0xFFFFFFFF
-            exec_result = self.update_flags(res)
-        
-        elif opcode == 21:  # LCLL (Load Constant Low)
-            # LCLL: Carrega nos 16 bits baixos e zera os altos
-            constant_16_val = (const_high << 8) | const_low # Usando high e low para formar os 16 bits
-            res = constant_16_val
-            exec_result = self.update_flags(res)
-
-        # 4. LOAD / STORE
-        elif opcode == 22:  # LW (Load Word - rc = MEM[ra + imm16])
-            addr = (a_val + (const_low & 0xFFFF))
-            # Prepara o registrador de pipeline para a fase MEM
-            self.EX_MEM = {
-                "ir": self.ID_EX["ir"],
-                "valid": True,
-                "opcode": opcode,
-                "rc": rc,
-                "address": addr, # Endereço calculado
-                "exec_rc": rc,
-                "exec_result": None # Resultado da memória será preenchido em MEM
-            }
+        # 2. Decodifica (usa a classe Instruction)
+        try:
+            inst = Instruction(instruction_binary)
+        except:
+            print(f"ERRO: Decodificação falhou para {instruction_binary}")
             return
             
-        elif opcode == 23:  # SW (Store Word - MEM[ra+imm16] = rb_value)
-            addr = (a_val + (const_low & 0xFFFF))
-            store_value = b_val
-            # Prepara o registrador de pipeline para a fase MEM
-            self.EX_MEM = {
-                "ir": self.ID_EX["ir"],
-                "valid": True,
-                "opcode": opcode,
-                "rc": rc,
-                "address": addr, # Endereço calculado
-                "store_value": store_value # Valor a ser armazenado
-            }
-            return
+        # [TODO: Hazard Detection deve inserir uma bolha/NOP aqui se houver Load-Use]
 
-        # 5. Branches / Jumps
-        elif opcode == 24:  # JAL (Jump and Link)
-            ret = pc_of_inst + 1 # Endereço de retorno (PC+1 da instrução atual)
-            exec_result = ret
-            exec_rc = 31 # Destino é R31 (Link Register)
-            jump_addr_val = self.ID_EX["jump_addr"]
-            dest = jump_addr_val & 0xFFFFFF
-            
-            # Atualiza o PC para o salto (Controle)
-            if 0 <= dest < MEMORY_SIZE_WORDS:
-                self.pc = dest
-            else:
-                self.halted = True
-        elif opcode == 25:  # JR (Jump Register)
-            dest = a_val
-            # Atualiza o PC para o salto (Controle)
-            if 0 <= dest < MEMORY_SIZE_WORDS:
-                self.pc = dest
-            else:
-                self.halted = True
-        elif opcode == 26:  # BEQ (Branch on Equal)
-            jump_addr_val = self.ID_EX["jump_addr"]
-            if a_val == b_val:
-                dest = jump_addr_val
-                # Atualiza o PC para o salto (Controle)
-                if 0 <= dest < MEMORY_SIZE_WORDS:
-                    self.pc = dest
-                else:
-                    self.halted = True
-        elif opcode == 27:  # BNE (Branch on Not Equal)
-            jump_addr_val = self.ID_EX["jump_addr"]
-            if a_val != b_val:
-                dest = jump_addr_val
-                # Atualiza o PC para o salto (Controle)
-                if 0 <= dest < MEMORY_SIZE_WORDS:
-                    self.pc = dest
-                else:
-                    self.halted = True
-        elif opcode == 28:  # J (Jump incondicional)
-            jump_addr_val = self.ID_EX["jump_addr"]
-            dest = jump_addr_val
-            # Atualiza o PC para o salto (Controle)
-            if 0 <= dest < MEMORY_SIZE_WORDS:
-                self.pc = dest
-            else:
-                self.halted = True
-
-        # Padrão: Escrita no EX/MEM para todas as instruções que não sejam LW/SW
-        # (ALU, CONST, JAL)
-        self.EX_MEM = {
-            "ir": self.ID_EX["ir"],
-            "valid": True,
-            "opcode": opcode,
-            "exec_result": exec_result, # Resultado da ALU/CONST/PC+1
-            "exec_rc": exec_rc # Registrador destino
-        }
-
-    # Estágio MEM (Memory Access)
-    def MEM(self):
-        if not self.EX_MEM.get("valid", False):
-            self.MEM_WB = bubble()
-            return
-
-        opcode = self.EX_MEM.get("opcode")
-        memwb = {
-            "ir": self.EX_MEM.get("ir"),
-            "opcode": opcode,
-            "valid": True,
-            "exec_rc": self.EX_MEM.get("exec_rc"),
-            "exec_result": self.EX_MEM.get("exec_result") # Resultado de EX (para ALU/CONST/JAL)
-        }
-
-        if opcode == 22:  # LW (Leitura da Memória)
-            addr = self.EX_MEM.get("address", 0)
-            if not (0 <= addr < MEMORY_SIZE_WORDS):
-                self.halted = True
-                return
-            value = self.memory[addr] & 0xFFFFFFFF
-            # O resultado para o WB é o valor lido da memória
-            memwb["exec_result"] = self.update_flags(value) 
-            
-        elif opcode == 23:  # SW (Escrita na Memória)
-            addr = self.EX_MEM.get("address", 0)
-            if not (0 <= addr < MEMORY_SIZE_WORDS):
-                self.halted = True
-                return
-            self.memory[addr] = self.EX_MEM.get("store_value", 0) & 0xFFFFFFFF
-            # SW não escreve em registradores (resultado é None)
-            memwb["exec_result"] = None
+        # 3. Lê Registradores (Rs e Rt)
+        # Esta parte requer a extração manual dos índices dos registradores do binário 
+        # (para evitar a complexidade do objeto 'inst' passando pelo pipeline)
         
-        self.MEM_WB = memwb
-
-    # Estágio WB (Write Back)
-    def WB(self):
-        if not self.MEM_WB.get("valid", False):
-            return
+        # Rs e Rt (campos de 8 bits)
+        rs_bin = instruction_binary[16:24]
+        rt_bin = instruction_binary[8:16]
         
-        # Só escreve no registrador se o resultado de execução não for None
-        if self.MEM_WB.get("exec_result") is not None:
-            dest = self.MEM_WB.get("exec_rc") & 0x1F
-            # R0 (índice 0) não pode ser escrito.
-            if dest != 0:
-                write_reg(self.registers, dest, self.MEM_WB.get("exec_result"))
-                
-        # Detecção final de HALT (caso a instrução HALT tenha passado pelo pipeline)
-        ir = self.MEM_WB.get("ir")
-        if ir == HALT_INSTRUCTION:
-            self.halted = True
+        # Conversão dos 5 bits inferiores para índice decimal
+        rs_index = int(rs_bin[-5:], 2)
+        rt_index = int(rt_bin[-5:], 2)
 
-    # step: avança um ciclo de clock (WB -> MEM -> EX -> ID -> IF)
+        read_data_1 = read_reg(self.registers, rs_index)
+        read_data_2 = read_reg(self.registers, rt_index)
+        
+        # 4. Gera Sinais de Controle (Simplificado: Opcode)
+        # [TODO: Lógica completa da Control Unit deve gerar os sinais 'Control_Signals']
+        
+        # 5. Atualiza o registrador ID/EX
+        self.ID_EX['Read_Data_1'] = read_data_1
+        self.ID_EX['Read_Data_2'] = read_data_2
+        self.ID_EX['PC_Next'] = self.IF_ID['PC_Next']
+        # [TODO: Implementar extração do Immediate e geração de sinais de controle]
+        
+    def execute(self):
+        """Estágio EX: Executa a ULA e calcula endereços."""
+        if not self.running: return
+
+        # [TODO: Implementar Forwarding Unit (Bypass) aqui, usando EX_MEM e MEM_WB]
+
+        # 1. Executa a ULA (Depende dos sinais de controle em ID_EX)
+        # ... (Lógica da ULA) ...
+        # self.EX_MEM['ALU_Result'] = ...
+
+        # 2. Atualiza o registrador EX/MEM
+        # self.EX_MEM['Write_Data'] = self.ID_EX['Read_Data_2'] # Dado para SW
+        # self.EX_MEM['Rd'] = self.ID_EX['Rd'] 
+        # ...
+        
+    def memory_access(self):
+        """Estágio MEM: Acessa a Memória de Dados."""
+        if not self.running: return
+
+        # [TODO: Implementar Lógica de MemRead/MemWrite usando EX_MEM]
+
+        # 1. Se MemRead (LW): Lê da memória de dados
+        # self.MEM_WB['Mem_Read_Data'] = read_mem(self.data_memory, self.EX_MEM['ALU_Result'])
+        
+        # 2. Se MemWrite (SW): Escreve na memória de dados
+        # write_mem(self.data_memory, self.EX_MEM['ALU_Result'], self.EX_MEM['Write_Data'])
+        
+        # 3. Atualiza o registrador MEM/WB
+        # self.MEM_WB['Rd'] = self.EX_MEM['Rd'] 
+        # ...
+
+    def write_back(self):
+        """Estágio WB: Escreve o Resultado no Banco de Registradores."""
+        if not self.running: return
+
+        # [TODO: Implementar Lógica de RegWrite usando MEM_WB]
+
+        # 1. Se RegWrite (ADD, LW, etc.): 
+        # write_reg(self.registers, self.MEM_WB['Rd'], self.MEM_WB['ALU_Result'] ou self.MEM_WB['Mem_Read_Data'])
+        # 2. Checa HALT (Se a instrução no MEM_WB for HALT, set self.running = False)
+        # ...
+        
     def step(self):
-        if self.halted:
-            return
-        self.cycle += 1
-        # Avança os estágios em ordem reversa para simular o clock
-        self.WB()
-        self.MEM()
-        self.EX()
-        self.ID()
-        self.IF()
+        """Executa um ciclo de relógio, movendo todas as instruções um estágio."""
+        self.write_back()
+        self.memory_access()
+        self.execute()
+        self.decode()
+        self.fetch()
+        
+        self.clock_cycle += 1
 
-    # utilidade: verifica se o pipeline ainda tem instruções válidas
-    def any_pipeline_active(self):
-        return (self.IF_ID.get("valid", False) or self.ID_EX.get("valid", False)
-                or self.EX_MEM.get("valid", False) or self.MEM_WB.get("valid", False))
+    def run(self):
+        """Roda a simulação até encontrar um HALT."""
+        print("\n--- INÍCIO DA SIMULAÇÃO ---")
+        while self.running and self.clock_cycle < 100: # Limite de ciclos para evitar loop infinito
+            self.step()
+            print(f"Ciclo {self.clock_cycle:03}: PC=0x{self.PC:04X}")
+            # [TODO: Implementar um print detalhado dos estágios aqui]
+            
+        print("\n--- FIM DA SIMULAÇÃO ---")
+        print(f"Total de Ciclos: {self.clock_cycle}")
+        print_registers(self.registers)
+        print_memory_data(self.data_memory)
