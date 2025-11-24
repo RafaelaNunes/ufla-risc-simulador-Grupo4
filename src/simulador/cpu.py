@@ -21,7 +21,10 @@ class ALU:
     def execute(operation_code: int, input_a: int, input_b: int) -> int:
         """Executa a operação da ULA e retorna o resultado (limitado a 32 bits)."""
         result = 0
-        
+        # Garante que os inputs são tratados como inteiros (0 se for None)
+        input_a = int(input_a) if input_a is not None else 0
+        input_b = int(input_b) if input_b is not None else 0
+        result = 0
         # A ULA é usada para todos os cálculos, incluindo endereço (ADD)
         if operation_code == 0b0000: # ADD (Load/Store, LUI/LLI, ADD R-Type)
             result = input_a + input_b
@@ -177,9 +180,13 @@ class CPU:
         # 3. Leitura dos Registradores
         rs_index = decoded_fields.get('Rs', 0) 
         rt_index = decoded_fields.get('Rt', 0)
-    
-        read_data_1 = read_reg(self.registers, rs_index)
-        read_data_2 = read_reg(self.registers, rt_index)
+        # Se a instrução for HALT, forçamos os registradores de leitura a R0 (valor 0)
+        if decoded_fields['mnemonic'] == 'HALT':
+            read_data_1 = 0 
+            read_data_2 = 0 
+        else:
+            read_data_1 = read_reg(self.registers, rs_index)
+            read_data_2 = read_reg(self.registers, rt_index)
         
         # 4. Atualiza o latch ID/EX
         self.ID_EX = {
