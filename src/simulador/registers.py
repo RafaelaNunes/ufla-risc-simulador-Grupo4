@@ -1,37 +1,34 @@
-# registers.py
+
 
 NUM_REGISTERS = 32
 
 def create_registers():
-    """Cria os 32 registradores (todos inicializados com zero). Retorna uma lista."""
-    # O registrador R0 é implicitamente zero aqui, mas a lógica de escrita em R0 
-    # deve ser tratada no seu simulador principal.
     return [0] * NUM_REGISTERS
 
-def read_reg(registers: list, index: int) -> int:
-    """Lê o valor de um registrador pelo seu índice (0-31)."""
-    if 0 <= index < NUM_REGISTERS:
-        return registers[index]
-    raise IndexError(f"Índice de registrador inválido: R{index}")
+# registers.py (Exemplo de correção)
+
+def read_reg(registers_list: list, index: int) -> int:
+    """Lê o valor de um registrador, garantindo que R0 sempre retorna 0."""
+    if index == 0:
+        return 0
+    # Adiciona verificação para evitar NoneType se o índice for inválido
+    if 0 < index < len(registers_list):
+        return registers_list[index]
+    else:
+        # Retorna 0 (ou levanta um erro, mas 0 é mais seguro para simulação)
+        print(f"Aviso: Tentativa de ler registrador com índice inválido: {index}")
+        return 0
 
 def write_reg(registers: list, index: int, value: int):
-    """
-    Escreve um valor em um registrador pelo seu índice (1-31).
-    Garante que o valor seja tratado como um inteiro de 32 bits (andando com 0xFFFFFFFF).
-    R0 não deve ser escrito (tratado pelo chamador).
-    """
     if index == 0:
-        # Ignora a escrita em R0 (Hardwired Zero)
         return
         
     if 0 < index < NUM_REGISTERS:
-        # Garante a aritmética de 32 bits (usa decimais, mas com o limite de 32 bits)
         registers[index] = value & 0xFFFFFFFF
     else:
         raise IndexError(f"Índice de registrador inválido para escrita: R{index}")
 
 def print_registers(registers: list):
-    """Imprime o estado dos registradores usando apenas valores decimais."""
     print("--- Banco de Registradores (Decimal) ---")
     for i in range(0, NUM_REGISTERS, 4):
         line_parts = []

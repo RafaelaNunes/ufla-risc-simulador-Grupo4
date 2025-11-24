@@ -1,6 +1,8 @@
 # test_instruction_decoding.py
+
 import os
-from src.simulador.instruction import Instruction 
+# Importa a função de decodificação e o mapeamento de Opcodes
+from src.simulador.instruction import decode_instruction, OPCODE_MAP 
 
 def decode_pipeline_file(file_path):
     """
@@ -23,7 +25,7 @@ def decode_pipeline_file(file_path):
                 if not raw_line:
                     continue
 
-                # 1. Checa a Diretiva 'address'
+                # 1. Checa a Diretiva 'address' (mantido)
                 if raw_line.lower().startswith('address'):
                     try:
                         address_str = raw_line.split()[1]
@@ -41,14 +43,20 @@ def decode_pipeline_file(file_path):
                 print(f"  Binário: {binary_string}")
 
                 try:
-                    # Cria e decodifica a instrução
-                    inst = Instruction(binary_string)
-                    print(inst)
+                    # **MUDANÇA AQUI:** Chama a função de decodificação
+                    inst_data = decode_instruction(binary_string)
                     
+                    # Gera uma representação simplificada para o teste:
+                    mnemonic = inst_data['mnemonic']
+                    inst_type = inst_data['type']
+                    
+                    print(f"  Tipo: {inst_type} ({mnemonic})")
+                    print(f"  Campos Decodificados: {inst_data}")
+
                     # 3. Condição de Parada HALT
-                    if inst.type == 'HALT':
+                    if inst_type == 'HALT':
                         print("\n*** HALT DETECTADO. Processamento do pipeline encerrado. ***")
-                        return # Encerra a função e o processamento do arquivo
+                        return 
                         
                 except ValueError as e:
                     print(f"  ERRO de Formato: {e}")
@@ -62,5 +70,9 @@ def decode_pipeline_file(file_path):
         print(f"Ocorreu um erro ao ler o arquivo: {e}")
 
 if __name__ == '__main__':
+    # Você pode manter este arquivo como um teste independente da CPU principal
     input_file = 'binarios/teste_pipeline.txt'
+    # Garante que o diretório exista antes de rodar.
+    if not os.path.isdir('binarios'):
+         os.makedirs('binarios')
     decode_pipeline_file(input_file)
