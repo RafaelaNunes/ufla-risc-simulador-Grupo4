@@ -71,7 +71,7 @@ def decode_pipeline_file(file_path):
 
 if __name__ == '__main__':
     # Você pode manter este arquivo como um teste independente da CPU principal
-    input_file = 'binarios/teste_pipeline.txt'
+    input_file = 'binarios/teste.txt'
     # Garante que o diretório exista antes de rodar.
     if not os.path.isdir('binarios'):
          os.makedirs('binarios')

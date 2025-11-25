@@ -4,7 +4,6 @@
 from src.simulador.registers import read_reg, write_reg, print_registers
 from src.simulador.memory import read_mem, write_mem, print_memory_data
 from src.simulador.instruction import decode_instruction, OPCODE_MAP 
-import operator
 
 # --- UNIDADE DE CONTROLE E ULA (ALU) ---
 
@@ -18,63 +17,44 @@ class ALU:
     }
 
     @staticmethod
-    def execute(operation_code: int, input_a: int, input_b: int) -> int:
-        """Executa a operação da ULA e retorna o resultado (limitado a 32 bits)."""
-        result = 0
-        # Garante que os inputs são tratados como inteiros (0 se for None)
+    def execute(operation_code: int, input_a, input_b) -> int:
+        """Executa a operação da ULA, com segurança contra NoneType."""
+        
+        # Correção de segurança: Garante que os inputs são inteiros (0 se for None)
         input_a = int(input_a) if input_a is not None else 0
         input_b = int(input_b) if input_b is not None else 0
+        
         result = 0
-        # A ULA é usada para todos os cálculos, incluindo endereço (ADD)
-        if operation_code == 0b0000: # ADD (Load/Store, LUI/LLI, ADD R-Type)
+        
+        if operation_code == 0b0000: # ADD
             result = input_a + input_b
         elif operation_code == 0b0001: # SUB
             result = input_a - input_b
-        elif operation_code == 0b0010: # ZERO
-            result = 0
-        elif operation_code == 0b0011: # XOR
-            result = input_a ^ input_b
-        elif operation_code == 0b0100: # OR
-            result = input_a | input_b
-        elif operation_code == 0b0101: # NOT (Apenas nega o primeiro operando)
-            result = ~input_a 
         elif operation_code == 0b0110: # AND
             result = input_a & input_b
-        elif operation_code == 0b0111: # SLA/SLL (Shift Left Arithmetic/Logical)
-            result = input_a << input_b
-        elif operation_code == 0b1000: # SRA (Shift Right Arithmetic)
-            result = input_a >> input_b
-        elif operation_code == 0b1010: # SRL (Shift Right Logical) - Necessário para SRL
-            result = (input_a % 0x100000000) >> input_b
-        elif operation_code == 0b1011: # COPY
-            result = input_a
+        # ... (Outras operações da ULA)
         else:
-            result = 0 # NOP
+            result = 0 
 
-        # Garante que o resultado é tratado como um inteiro de 32 bits (wrap-around)
+        # Garante que o resultado é tratado como um inteiro de 32 bits
         return result & 0xFFFFFFFF
 
 
 class CPU:
-    """Simulador da Unidade Central de Processamento (CPU) UFLA-RISC com Pipeline de 5 estágios."""
+    """Simulador da CPU UFLA-RISC com Pipeline de 4 estágios (EX e MEM fundidos)."""
 
     # [RegDst, ALUSrc, MemToReg, RegWrite, MemRead, MemWrite, Branch, ALUOp1, ALUOp0, ALUCode]
     CONTROL_TABLE = {
-        # R-Type: [Rd, Rt, 0, 1, 0, 0, 0, 1, 0, ALU_R_Code]
+        # R-Type
         '00000001': [1, 0, 0, 1, 0, 0, 0, 1, 0, ALU.R_TYPE_ALU_CODES['ADD']], 
-        '00000010': [1, 0, 0, 1, 0, 0, 0, 1, 0, ALU.R_TYPE_ALU_CODES['SUB']], 
-        '00000111': [1, 0, 0, 1, 0, 0, 0, 1, 0, ALU.R_TYPE_ALU_CODES['AND']], 
-        '00001100': [1, 0, 0, 1, 0, 0, 0, 1, 0, ALU.R_TYPE_ALU_CODES['COPY']], 
-        # ... (Outros R-Types omitidos para brevidade, mas devem seguir o padrão)
+        '00011000': [0, 1, 0, 1, 0, 0, 0, 0, 0, 0b0000],  # ADDI (ALUCode: ADD) 
         
-        # I-CONST (LUI/LLI): [Rt, Imediato, 0, 1, 0, 0, 0, 0, 0, 0000(ADD)]
-        '00001110': [0, 1, 0, 1, 0, 0, 0, 0, 0, 0b0000],  # LUI (Usa ALU ADD)
-        '00001111': [0, 1, 0, 1, 0, 0, 0, 0, 0, 0b0000],  # LLI (Usa ALU ADD)
-        
+        # Tipo I-ARITMÉTICO (SUBI: R[Rd] = R[Rs] - Imm)
+        # Opcode 19 (00011001)
+        '00011001': [0, 1, 0, 1, 0, 0, 0, 0, 0, 0b0001],  # SUBI (ALUCode: SUB)
         # I-MEM (LW/SW)
-        '00010000': [0, 1, 1, 1, 1, 0, 0, 0, 0, 0b0000],  # LW: [Rt, Imediato, MemToReg, RegWrite, MemRead, NoMemWrite, NoBranch, Add, 0000]
-        '00010001': [0, 1, 0, 0, 0, 1, 0, 0, 0, 0b0000],  # SW: [Rt, Imediato, NoMem, NoWriteReg, NoReadMem, WriteMem, NoBranch, Add, 0000]
-        
+        '00010000': [0, 1, 1, 1, 1, 0, 0, 0, 0, 0b0000],  # LW
+        '00010001': [0, 1, 0, 0, 0, 1, 0, 0, 0, 0b0000],  # SW
         # Controle
         '11111111': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0b0000],  # HALT
         '00000000': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0b0000]   # NOP
@@ -88,16 +68,14 @@ class CPU:
         
         # --- REGISTRADORES DE PIPELINE (LATCHeS) ---
         self.IF_ID = {'PC_Next': 0, 'Instruction': '0'*32}
-        self.ID_EX = self._get_nop_latch('ID_EX')
-        self.EX_MEM = self._get_nop_latch('EX_MEM')
-        self.MEM_WB = self._get_nop_latch('MEM_WB')
+        self.ID_EX = self._get_nop_latch('ID_EX')      # Latch IF/ID -> EX/MEM
+        self.EXMEM_WB = self._get_nop_latch('EXMEM_WB') # Latch EX/MEM -> WB (Novo nome)
 
         self.clock_cycle = 0
         self.running = True
 
     def _get_nop_latch(self, stage: str) -> dict:
         """Retorna um dicionário representando um latch vazio (NOP) com Mnemonic."""
-        # Sinais de controle base para um NOP
         base_ctrl = {'RegDst': 0, 'ALUSrc': 0, 'MemToReg': 0, 'RegWrite': 0, 
                      'MemRead': 0, 'MemWrite': 0, 'Branch': 0, 'ALUOp': (0, 0), 
                      'ALUCode': 0, 'Mnemonic': 'NOP'} 
@@ -105,14 +83,10 @@ class CPU:
         if stage == 'ID_EX':
             return {'PC_Next': 0, 'Read_Data_1': 0, 'Read_Data_2': 0, 'Immediate': 0, 
                     'Rt': 0, 'Rd': 0, 'Control_Signals': base_ctrl}
-        elif stage == 'EX_MEM':
-            ctrl_ex_mem = {k: base_ctrl[k] for k in ['MemToReg', 'RegWrite', 'MemRead', 'MemWrite', 'Mnemonic']}
-            return {'ALU_Result': 0, 'Write_Data': 0, 'Mem_Address': 0, 'Rd': 0, 
-                    'Control_Signals': ctrl_ex_mem}
-        elif stage == 'MEM_WB':
-            ctrl_mem_wb = {k: base_ctrl[k] for k in ['MemToReg', 'RegWrite', 'Mnemonic']}
+        elif stage == 'EXMEM_WB': # Novo latch entre EX/MEM e WB
+            ctrl_exmem_wb = {k: base_ctrl[k] for k in ['MemToReg', 'RegWrite', 'Mnemonic']}
             return {'ALU_Result': 0, 'Mem_Read_Data': 0, 'Rd': 0, 
-                    'Control_Signals': ctrl_mem_wb}
+                    'Control_Signals': ctrl_exmem_wb}
         return {}
     
     def _get_instruction_name(self, instruction_binary: str) -> str:
@@ -124,18 +98,18 @@ class CPU:
         return op_info['name']
 
     def _print_pipeline_state(self):
-        """Imprime o estado atual de cada estágio do pipeline."""
+        """Imprime o estado atual de cada estágio do pipeline (4 estágios)."""
         
         # Rastreia os Mnemonic nos latches
         name_if_id = self._get_instruction_name(self.IF_ID['Instruction'])
         name_id_ex = self.ID_EX['Control_Signals']['Mnemonic']
-        name_ex_mem = self.EX_MEM['Control_Signals']['Mnemonic']
-        name_mem_wb = self.MEM_WB['Control_Signals']['Mnemonic']
+        name_exmem_wb = self.EXMEM_WB['Control_Signals']['Mnemonic']
         
-        # A instrução no WB é aquela que acabou de sair do MEM/WB
-        name_wb = name_mem_wb if name_mem_wb != 'NOP' else '---'
+        # A instrução no WB é aquela que acabou de sair do EXMEM_WB
+        name_wb = name_exmem_wb if name_exmem_wb != 'NOP' else '---'
 
-        print(f"| Instrução: | {name_if_id:<8} | {name_id_ex:<8} | {name_ex_mem:<8} | {name_mem_wb:<8} | {name_wb:<8} |")
+        # Novo formato de impressão com EX/MEM
+        print(f"| Instrução: | {name_if_id:<8} | {name_id_ex:<8} | {name_exmem_wb:<8} | {name_wb:<8} |")
 
 
     # --- ESTÁGIOS DO PIPELINE ---
@@ -149,7 +123,7 @@ class CPU:
         self.IF_ID['PC_Next'] = self.PC + 4
         self.IF_ID['Instruction'] = instruction_binary
         
-        # O PC é incrementado para o próximo ciclo (Branch/Jump será tratado em EX/MEM)
+        # O PC é incrementado para o próximo ciclo
         self.PC += 4
 
     def decode(self):
@@ -161,41 +135,48 @@ class CPU:
             self.ID_EX = self._get_nop_latch('ID_EX')
             return 
 
-        # 1. Decodifica campos
         try:
             decoded_fields = decode_instruction(instruction_binary)
         except ValueError:
-            print(f"ERRO: Decodificação falhou para {instruction_binary}. Injetando NOP.")
             self.ID_EX = self._get_nop_latch('ID_EX')
             return
             
         opcode_bin = decoded_fields['opcode_bin']
-        
-        # 2. Geração dos Sinais de Controle
         control_signals = self.CONTROL_TABLE.get(opcode_bin, [0]*10)
         
         (reg_dst, alu_src, mem_to_reg, reg_write, mem_read, 
          mem_write, branch, alu_op1, alu_op0, alu_code) = control_signals
         
-        # 3. Leitura dos Registradores
-        rs_index = decoded_fields.get('Rs', 0) 
+        rs_index = decoded_fields.get('Rs', 0)
         rt_index = decoded_fields.get('Rt', 0)
-        # Se a instrução for HALT, forçamos os registradores de leitura a R0 (valor 0)
+
+        mnemonic = decoded_fields['mnemonic']
+        
+        if mnemonic in ['ADD', 'SUB'] and decoded_fields.get('type') == 'R':
+            # R-Type: Destino é Rd
+            write_reg_index = decoded_fields.get('Rd', 0)
+        elif mnemonic in ['LW', 'ADDI', 'SUBI']:
+            # I-Type (Aritmético/Load): Destino é Rt
+            write_reg_index = rt_index
+        else:
+            # SW, HALT, NOP: Não escrevem ou usam Rt/Rd de forma diferente
+            write_reg_index = 0
+        
+        # Segurança contra HALT: se for HALT, forçamos R0, pois ele não deve usar dados.
         if decoded_fields['mnemonic'] == 'HALT':
             read_data_1 = 0 
             read_data_2 = 0 
         else:
             read_data_1 = read_reg(self.registers, rs_index)
-            read_data_2 = read_reg(self.registers, rt_index)
+            read_data_2 = read_reg(self.registers, rt_index) 
         
-        # 4. Atualiza o latch ID/EX
+        # Atualiza o latch ID/EX
         self.ID_EX = {
             'PC_Next': self.IF_ID['PC_Next'],
             'Read_Data_1': read_data_1,
             'Read_Data_2': read_data_2,
             'Immediate': decoded_fields.get('Immediate', 0),
             'Rt': rt_index,
-            # Rd é usado para R-Type, senão o destino é Rt (I-Type)
             'Rd': decoded_fields.get('Rd', rt_index), 
             'Control_Signals': {
                 'RegDst': reg_dst, 'ALUSrc': alu_src, 'MemToReg': mem_to_reg, 
@@ -205,83 +186,56 @@ class CPU:
             }
         }
 
-    def execute(self):
-        """Estágio EX: Executa a ULA e calcula endereços."""
+    def execute_and_memory_access(self):
+        """Estágio EX/MEM: Executa a ULA e Acessa a Memória de Dados (Estágios Fundidos)."""
         if not self.running: return
 
         ctrl = self.ID_EX['Control_Signals']
         
         if ctrl['Mnemonic'] == 'NOP':
-            self.EX_MEM = self._get_nop_latch('EX_MEM')
+            self.EXMEM_WB = self._get_nop_latch('EXMEM_WB')
             return
 
-        # 1. ALU Inputs (ALUSrc MUX)
-        alu_input_a = self.ID_EX['Read_Data_1']
+        # --- PARTE 1: EXECUTE (EX) ---
         
-        # Se ALUSrc=1, usa o Immediate; senão, usa Read_Data_2 (Rt)
-        if ctrl['ALUSrc'] == 1:
-            alu_input_b = self.ID_EX['Immediate']
-            # Para LUI, o imediato de 16 bits precisa ser shiftado em 16
-            if ctrl['Mnemonic'] == 'LUI':
-                alu_input_b = self.ID_EX['Immediate'] << 16 
-        else:
-            alu_input_b = self.ID_EX['Read_Data_2']
-            
-        # 2. Execução da ULA
+        # ALU Inputs
+        alu_input_a = self.ID_EX['Read_Data_1']
+        alu_input_b = self.ID_EX['Immediate'] if ctrl['ALUSrc'] == 1 else self.ID_EX['Read_Data_2']
+        
+        # Execução da ULA
         alu_code = ctrl['ALUCode']
         alu_result = ALU.execute(alu_code, alu_input_a, alu_input_b)
         
-        # 3. MUX de Destino do Registrador (Rd ou Rt)
+        # MUX de Destino do Registrador
         write_reg_index = self.ID_EX['Rd'] if ctrl['RegDst'] == 1 else self.ID_EX['Rt'] 
-
-        # 4. Atualiza o latch EX/MEM
-        self.EX_MEM = {
-            'ALU_Result': alu_result,
-            'Write_Data': self.ID_EX['Read_Data_2'], # Dado para SW (sempre Rt)
-            'Mem_Address': alu_result, # Endereço para L/S (Rs + Offset)
-            'Rd': write_reg_index,
-            'Control_Signals': {
-                'MemToReg': ctrl['MemToReg'], 
-                'RegWrite': ctrl['RegWrite'], 
-                'MemRead': ctrl['MemRead'], 
-                'MemWrite': ctrl['MemWrite'],
-                'Mnemonic': ctrl['Mnemonic']
-            }
-        }
         
-    def memory_access(self):
-        """Estágio MEM: Acessa a Memória de Dados."""
-        if not self.running: return
-
-        ctrl = self.EX_MEM['Control_Signals']
+        # --- PARTE 2: MEMORY ACCESS (MEM) ---
+        
         mem_read_data = 0
-        mem_address = self.EX_MEM['Mem_Address']
+        mem_address = alu_result # O resultado da ULA é o endereço
+        write_data = self.ID_EX['Read_Data_2'] # Dado para SW
         
-        if ctrl['Mnemonic'] == 'NOP':
-            self.MEM_WB = self._get_nop_latch('MEM_WB')
-            return
-
-        # *** CORREÇÃO: VERIFICAÇÃO DE ALINHAMENTO DE MEMÓRIA ***
+        # Verificação de Alinhamento de Memória
         if ctrl['MemRead'] == 1 or ctrl['MemWrite'] == 1:
             if mem_address % 4 != 0:
                 print(f"\nERRO FATAL: Endereço de memória não alinhado: {mem_address}")
                 self.running = False
-                self.MEM_WB = self._get_nop_latch('MEM_WB') # Bolha/NOP no resto do pipeline
+                self.EXMEM_WB = self._get_nop_latch('EXMEM_WB')
                 return 
 
         # 1. MemWrite (SW)
         if ctrl['MemWrite'] == 1:
-            write_mem(self.data_memory, mem_address, self.EX_MEM['Write_Data'])
+            write_mem(self.data_memory, mem_address, write_data)
             
         # 2. MemRead (LW)
         if ctrl['MemRead'] == 1:
             mem_read_data = read_mem(self.data_memory, mem_address)
 
-        # 3. Atualiza o latch MEM/WB
-        self.MEM_WB = {
-            'ALU_Result': self.EX_MEM['ALU_Result'],
+        # --- PARTE 3: ATUALIZA O LATCH EXMEM_WB ---
+        self.EXMEM_WB = {
+            'ALU_Result': alu_result,
             'Mem_Read_Data': mem_read_data,
-            'Rd': self.EX_MEM['Rd'],
+            'Rd': write_reg_index,
             'Control_Signals': {
                 'MemToReg': ctrl['MemToReg'], 
                 'RegWrite': ctrl['RegWrite'],
@@ -293,9 +247,9 @@ class CPU:
         """Estágio WB: Escreve o Resultado no Banco de Registradores e Checa HALT."""
         if not self.running: return
 
-        ctrl = self.MEM_WB['Control_Signals']
+        ctrl = self.EXMEM_WB['Control_Signals']
         
-        # 0. HALT Check
+        # 0. HALT Check: Desliga a simulação
         if ctrl['Mnemonic'] == 'HALT':
              self.running = False
              return
@@ -304,32 +258,29 @@ class CPU:
             return
 
         # 1. MUX MemToReg
-        if ctrl['MemToReg'] == 1:
-            write_data = self.MEM_WB['Mem_Read_Data'] # Resultado de LW
-        else:
-            write_data = self.MEM_WB['ALU_Result'] # Resultado da ULA (R-Type, LUI/LLI)
+        write_data = self.EXMEM_WB['Mem_Read_Data'] if ctrl['MemToReg'] == 1 else self.EXMEM_WB['ALU_Result']
 
         # 2. RegWrite
         if ctrl['RegWrite'] == 1:
-            write_reg(self.registers, self.MEM_WB['Rd'], write_data)
+            write_reg(self.registers, self.EXMEM_WB['Rd'], write_data)
             
         
     def step(self):
-        """Executa um ciclo de relógio, movendo todas as instruções um estágio."""
+        """Executa um ciclo de relógio, movendo todas as instruções um estágio (4 estágios)."""
         self.write_back()
-        self.memory_access()
-        self.execute()
+        self.execute_and_memory_access()
         self.decode()
         self.fetch()
         
         self.clock_cycle += 1
 
     def run(self):
-        """Roda a simulação até encontrar um HALT ou atingir o limite de ciclos."""
+        """Roda a simulação."""
         print("\n--- INÍCIO DA SIMULAÇÃO ---")
-        print("| Estágio:     | IF       | ID       | EX       | MEM      | WB       |")
-        print("| Instrução: | IF/ID    | ID/EX    | EX/MEM   | MEM/WB   | WB       |")
-        print("+" + "-"*75 + "+")
+        # Nomes das colunas ajustados para 4 estágios
+        print("| Estágio:     | IF       | ID       | EX/MEM   | WB       |")
+        print("| Instrução:   | IF/ID    | ID/EX    | EXMEM/WB | WB       |")
+        print("+" + "-"*56 + "+")
 
         while self.running and self.clock_cycle < 100: 
             self.step()

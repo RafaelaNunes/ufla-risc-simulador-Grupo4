@@ -15,6 +15,9 @@ OPCODE_MAP = {
     '00001010': {'name': 'SLL', 'type': 'R'}, # Shift lógico à esquerda
     '00001011': {'name': 'SRL', 'type': 'R'}, # Shift lógico à direita
     '00001100': {'name': 'COPY', 'type': 'R'},# Cópia
+
+    '00011000': {'name': 'ADDI', 'type': 'I_ARITH'}, # Opcode 18
+    '00011001': {'name': 'SUBI', 'type': 'I_ARITH'}, # Opcode 19
     
     # 2. Instruções de Constante (Tipo I_CONST: Rt, Imediato 16 bits)
     '00001110': {'name': 'LUI', 'type': 'I_CONST'}, # Carrega constante 16 bits nos 2 bytes MAIS sig.
@@ -82,6 +85,21 @@ def decode_instruction(binary_string: str) -> dict:
         result['Rt'] = _bin_to_reg_index(field_rt_bin) # Registrador a ser carregado/armazenado
         result['Rs'] = _bin_to_reg_index(field_rs_bin) # Registrador base do endereço
         result['Immediate'] = _bin_to_imm(field_extra_bin) # Offset (Imediato de 8 bits)
+
+    elif inst_type == 'I_ARITH':
+        # Formato I (Aritmético): [Opcode (8), Rd (8), Rs (8), Imediato (8)]
+        # O campo 8:16 (field_rt_bin) é o Registrador Destino (Rd)
+        result['Rd'] = _bin_to_reg_index(field_rt_bin) 
+        
+        # O campo 16:24 (field_rs_bin) é o Registrador Fonte (Rs)
+        result['Rs'] = _bin_to_reg_index(field_rs_bin) 
+        
+        # O campo 24:32 (field_extra_bin) é o Imediato
+        result['Immediate'] = _bin_to_imm(field_extra_bin) 
+
+        # IMPORTANTE para o Pipeline: O Latch ID/EX espera que o destino de I-Type esteja no campo Rt.
+        # Por isso, configuramos Rt igual a Rd (destino).
+        result['Rt'] = result['Rd']
         
     elif inst_type == 'I_CONST':
         # Formato I (Constante): [Opcode (8), Rt (8), Imediato (16 bits em Rs+Offset)]

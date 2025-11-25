@@ -52,8 +52,9 @@ def load_program(file_path: str) -> tuple:
 
 def main():
     """Função principal para configurar e rodar a simulação da CPU."""
-    program_file = 'binarios/teste_pipeline.txt'
+    program_file = 'binarios/teste.txt'
     
+
     try:
         # FASE 1: Carregamento do Programa
         instruction_mem_dict, initial_pc = load_program(program_file)
