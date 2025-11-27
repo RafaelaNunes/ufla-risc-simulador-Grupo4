@@ -77,7 +77,7 @@ def main():
         print("\n--- INÍCIO DA EXECUÇÃO DO PIPELINE ---")
         
         # Passa as duas listas separadamente
-        cpu = CPU(instruction_mem_dict, registers_list, data_memory_list, initial_pc)
+        cpu = CPU(instruction_mem_dict, registers_list, data_memory_list)
         
         cpu.run() # Executa o pipeline e exibe o estado final
         

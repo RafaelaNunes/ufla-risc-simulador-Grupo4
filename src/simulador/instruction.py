@@ -1,82 +1,119 @@
 # src/simulador/instruction.py
 
-# --- DEFINIÇÃO COMPLETA DE INSTRUÇÕES (UFLA-RISC) ---
-OPCODE_MAP = {
-    # 1. Tipo R (Formato: Op | Rd | Rs | Rt)
-    '00000001': {'name': 'ADD', 'type': 'R'},   # Adição de inteiros
-    '00000010': {'name': 'SUB', 'type': 'R'},   # Subtração de inteiros
-    '00000011': {'name': 'ZERO', 'type': 'R'},  # Zero
-    '00000100': {'name': 'XOR', 'type': 'R'},   # Xor
-    '00000101': {'name': 'OR', 'type': 'R'},    # Or
-    '00000110': {'name': 'NOT', 'type': 'R'},   # Not (Monadic: usa apenas Rs, Rd)
-    '00000111': {'name': 'AND', 'type': 'R'},   # And
-    '00001000': {'name': 'SLA', 'type': 'R'},   # Shift aritimético p/ esquerda
-    '00001001': {'name': 'SRA', 'type': 'R'},   # Shift aritimético p/ direita
-    '00001010': {'name': 'SLL', 'type': 'R'},   # Shift lógico à esquerda
-    '00001011': {'name': 'SRL', 'type': 'R'},   # Shift lógico à direita
-    '00001100': {'name': 'COPY', 'type': 'R'},  # Cópia (Monadic: R[Rd] <- R[Rs])
-
-    # 2. Instruções Aritméticas Imediatas (Tipo I_ARITH: Op | Rd | Rs | Imm)
-    '00011000': {'name': 'ADDI', 'type': 'I_ARITH'}, # Opcode 18
-    '00011001': {'name': 'SUBI', 'type': 'I_ARITH'}, # Opcode 19
-    
-    # 3. Instruções de Constante (Tipo I_CONST: Op | Rt | Imm_H (8) | Imm_L (8))
-    '00001110': {'name': 'LUI', 'type': 'I_CONST'}, # Carrega 16 bits nos 2 bytes MAIS sig.
-    '00001111': {'name': 'LLI', 'type': 'I_CONST'}, # Carrega 16 bits nos 2 bytes MENOS sig.
-    
-    # 4. Instruções de Memória (Tipo I_MEM: Op | Rt | Rs | Imm (Offset))
-    '00010000': {'name': 'LW', 'type': 'I_MEM'},    # Load Word
-    '00010001': {'name': 'SW', 'type': 'I_MEM'},    # Store Word
-    
-    # 5. Controle
-    '00000000': {'name': 'NOP', 'type': 'NOP'},  # NOP
-    '11111111': {'name': 'HALT', 'type': 'HALT'} # Parada
-}
+# ==============================================================================
+# Funções de Conversão e Auxiliares
+# ==============================================================================
 
 def bin_to_int(binary_str: str) -> int:
-    """Converte binário de 32 bits para inteiro assinado (complemento de dois)."""
-    if not binary_str: return 0
-    size = len(binary_str)
-    # Verifica o bit de sinal
+    """Converte string binária para inteiro, tratando o bit de sinal (complemento de dois)."""
+    if not binary_str:
+        return 0
+    
+    # Preenche para 32 bits (padrão do pipeline)
+    while len(binary_str) < 32:
+        binary_str = binary_str[0] + binary_str # Estende o bit de sinal
+
+    # Verifica se é negativo (bit mais significativo é 1)
     if binary_str[0] == '1':
-        # Valor negativo: complemento de dois
-        return int(binary_str, 2) - (1 << size)
-    return int(binary_str, 2)
+        # Converte para complemento de dois
+        # 1. Inverte todos os bits
+        inverted_bits = ''.join(['1' if b == '0' else '0' for b in binary_str])
+        # 2. Soma 1 e inverte o sinal
+        return -(int(inverted_bits, 2) + 1)
+    else:
+        return int(binary_str, 2)
+
+def reg_to_bin(reg_str: str) -> str:
+    """Converte nome de registrador (R0 a R15) para binário de 4 bits."""
+    try:
+        reg_num = int(reg_str[1:])
+        if 0 <= reg_num <= 15:
+            return format(reg_num, '04b')
+        else:
+            raise ValueError("Número do registrador fora do intervalo (0-15).")
+    except (ValueError, IndexError):
+        raise ValueError(f"Formato de registrador inválido: {reg_str}")
+
+# ==============================================================================
+# Definição e Decodificação das Instruções
+# ==============================================================================
+
+# --- DEFINIÇÃO COMPLETA DE INSTRUÇÕES (UFLA-RISC) ---
+OPCODE_MAP = {
+    # 1. Tipo R (0-12)
+    '00000001': {'name': 'ADD', 'type': 'R'}, '00000010': {'name': 'SUB', 'type': 'R'},
+    '00000011': {'name': 'ZERO', 'type': 'R'}, '00000100': {'name': 'XOR', 'type': 'R'},
+    '00000101': {'name': 'OR', 'type': 'R'}, '00000110': {'name': 'NOT', 'type': 'R'},
+    '00000111': {'name': 'AND', 'type': 'R'}, '00001000': {'name': 'SLA', 'type': 'R'},
+    '00001001': {'name': 'SRA', 'type': 'R'}, '00001010': {'name': 'SLL', 'type': 'R'},
+    '00001011': {'name': 'SRL', 'type': 'R'}, '00001100': {'name': 'COPY', 'type': 'R'},
+    
+    # NOVOS R-Type (20, 21, 27)
+    '00010100': {'name': 'MUL', 'type': 'R'},  # 20
+    '00010101': {'name': 'DIV', 'type': 'R'},  # 21
+    '00011011': {'name': 'NOR', 'type': 'R'},  # 27
+
+    # 2. Instruções Aritméticas Imediatas (I_ARITH) 
+    # Opcodes Originais (24, 25)
+    '00011000': {'name': 'ADDI', 'type': 'I_ARITH'}, # 24
+    '00011001': {'name': 'SUBI', 'type': 'I_ARITH'}, # 25
+
+    # NOVOS I-ARITH (22, 23, 28)
+    '00010110': {'name': 'MULI', 'type': 'I_ARITH'}, # 22
+    '00010111': {'name': 'ANDI', 'type': 'I_ARITH'}, # 23
+    '00011100': {'name': 'SLTI', 'type': 'I_ARITH'}, # 28
+    
+    # 3. Instruções de Constante (I_CONST)
+    '00001110': {'name': 'LUI', 'type': 'I_CONST'},   # 14
+    '00011010': {'name': 'LLI', 'type': 'I_CONST'},   # 26
+
+    # 4. Instruções de Memória (I_MEM)
+    '00010000': {'name': 'LW', 'type': 'I_MEM'},# 16
+    '00010001': {'name': 'SW', 'type': 'I_MEM'},# 17
+    
+    # 5. Controle
+    '00000000': {'name': 'NOP', 'type': 'NOP'},
+    '11111111': {'name': 'HALT', 'type': 'HALT'}
+}
 
 def decode_instruction(instruction_binary: str) -> dict:
-    """Decodifica uma instrução binária de 32 bits e retorna seus campos."""
-    if len(instruction_binary) != 32:
-        raise ValueError("Instrução binária inválida.")
-        
-    opcode_bin = instruction_binary[0:8]
-    op_info = OPCODE_MAP.get(opcode_bin)
+    """Decodifica uma instrução binária de 32 bits, retornando seus campos."""
     
-    if not op_info:
-        return {'mnemonic': 'UNKNOWN', 'opcode_bin': opcode_bin}
+    opcode = instruction_binary[0:8]
+    op_info = OPCODE_MAP.get(opcode)
 
-    decoded = {'opcode_bin': opcode_bin, 'mnemonic': op_info['name'], 'type': op_info['type']}
-    
-    # Campos base: 8 bits cada
-    F1 = instruction_binary[8:16]
-    F2 = instruction_binary[16:24]
-    F3 = instruction_binary[24:32]
-    
-    if op_info['type'] == 'R':
-        # R-Type: F1=Rd, F2=Rs, F3=Rt
-        decoded['Rd'] = int(F1, 2)
+    if not op_info:
+        raise ValueError(f"Opcode não reconhecido: {opcode}")
+
+    decoded = {'Opcode': opcode, 'Mnemonic': op_info['name'], 'Type': op_info['type']}
+
+    if op_info['type'] in ['R', 'I_ARITH', 'I_MEM']:
+        # Campos genéricos (R-Type: Rd/Rs/Rt, I-Type: Rt/Rs/Imm)
+        F1 = instruction_binary[8:12]  # Rd (R) ou Rt (I)
+        F2 = instruction_binary[12:16] # Rs
+        F3 = instruction_binary[16:32] # Rt (R) ou Imm (I)
+
         decoded['Rs'] = int(F2, 2)
-        decoded['Rt'] = int(F3, 2)
         
-    elif op_info['type'] in ['I_ARITH', 'I_MEM']:
-        # I-Type: F1=Rt/Rd, F2=Rs, F3=Imm (8 bits)
-        decoded['Rt'] = int(F1, 2) 
-        decoded['Rs'] = int(F2, 2)
-        decoded['Immediate'] = bin_to_int(F3) # Imediato de 8 bits
-        
+        if op_info['type'] == 'R':
+            # Formato R: OP | Rd | Rs | Rt
+            decoded['Rd'] = int(F1, 2)
+            decoded['Rt'] = int(F3, 2)
+        else: # I_ARITH, I_MEM
+            # Formato I: OP | Rt | Rs | Imm
+            decoded['Rt'] = int(F1, 2)
+            # Immediato é um valor de 16 bits
+            decoded['Immediate'] = bin_to_int(F3) 
+
     elif op_info['type'] == 'I_CONST':
-        # I-CONST: F1=Rt, F2=Imm_H (8), F3=Imm_L (8)
+        # Formato I_CONST: OP | Rt | Imm_H (8) | Imm_L (8)
+        F1 = instruction_binary[8:12]  # Rt
+        F2 = instruction_binary[12:20] # Imm_H
+        F3 = instruction_binary[20:28] # Imm_L
+
         decoded['Rt'] = int(F1, 2)
+        # O valor imediato completo é 16 bits, não assinado.
         imm_16_bin = F2 + F3
-        decoded['Immediate'] = bin_to_int(imm_16_bin)
-        
+        decoded['Immediate'] = int(imm_16_bin, 2)
+
     return decoded
