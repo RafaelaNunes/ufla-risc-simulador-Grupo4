@@ -1,40 +1,24 @@
-# memory.py
+# src/simulador/memory.py
 
-MEMORY_SIZE_WORDS = 65536  # 2^16 posições de palavra (palavra = 4 bytes)
+WORD_SIZE = 4 # 4 bytes por palavra
 
-def create_memory():
-    """Cria a memória do processador como uma lista de inteiros (palavras de 32 bits)."""
-    return [0] * MEMORY_SIZE_WORDS
+def read_mem(memory_list: list, address: int) -> int:
+    """Lê uma palavra de 4 bytes da memória de dados (por índice de palavra)."""
+    index = address // WORD_SIZE
+    if index < len(memory_list):
+        return memory_list[index]
+    return 0
 
-def read_mem(memory: list, address: int) -> int:
+def write_mem(memory_list: list, address: int, data: int):
+    """Escreve uma palavra de 4 bytes na memória de dados (por índice de palavra)."""
+    index = address // WORD_SIZE
+    if index < len(memory_list):
+        memory_list[index] = data
 
-    if address % 4 != 0:
-        raise ValueError(f"Endereço de memória não alinhado: {address}")
-
-    word_index = address // 4
-    if 0 <= word_index < MEMORY_SIZE_WORDS:
-        return memory[word_index]
-    raise IndexError(f"Endereço de memória fora do limite: {address}")
-
-def write_mem(memory: list, address: int, value: int):
-
-    if address % 4 != 0:
-        raise ValueError(f"Endereço de memória não alinhado: {address}")
-        
-    word_index = address // 4
-    if 0 <= word_index < MEMORY_SIZE_WORDS:
-        memory[word_index] = value & 0xFFFFFFFF
-    else:
-        raise IndexError(f"Endereço de memória fora do limite para escrita: {address}")
-
-def load_instruction_mem(memory: dict, address: int, binary_string: str):
-    memory[address] = binary_string
-
-def print_memory_data(memory: list):
-    
+def print_memory_data(memory_list: list):
+    """Imprime o estado dos primeiros endereços da memória de dados."""
     print("--- Memória de Dados (Primeiras Palavras, Decimal) ---")
-    
-    for i in range(0, 16): 
-        address = i * 4
-        value = memory[i]
+    for i in range(16):
+        address = i * WORD_SIZE
+        value = memory_list[i] if i < len(memory_list) else 0
         print(f"Endereço {address:<4}: {value}")
