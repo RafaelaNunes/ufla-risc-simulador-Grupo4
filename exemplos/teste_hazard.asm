@@ -1,5 +1,4 @@
 ADDI R1, R0, 3
-ADDI R2, R0, 4
 NOP 
 NOP 
 SUBI R1, R0, 2

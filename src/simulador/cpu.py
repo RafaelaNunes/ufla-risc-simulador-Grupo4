@@ -1,7 +1,7 @@
 # src/simulador/cpu.py
 
 # Imports
-from src.simulador.registers import read_reg, write_reg, print_registers # AGORA SÃO LISTAS SEPARADAS
+from src.simulador.registers import read_reg, write_reg, print_registers
 from src.simulador.memory import read_mem, write_mem, print_memory_data
 from src.simulador.instruction import decode_instruction, OPCODE_MAP, bin_to_int 
 
@@ -61,6 +61,11 @@ class CPU:
     """Simulador da CPU UFLA-RISC com Pipeline de 4 estágios (EX e MEM fundidos)."""
 
     # [RegDst, ALUSrc, MemToReg, RegWrite, MemRead, MemWrite, Branch, ALUOp1, ALUOp0, ALUCode]
+    CONTROL_TABLE = {
+        # ... (Tabela de controle omitida por ser idêntica) ...
+    }
+    
+    # [RegDst, ALUSrc, MemToReg, RegWrite, MemRead, MemWrite, Branch, ALUOp1, ALUOp0, ALUCode]
     # ALUOp1 e ALUOp0 (Não usados, mas mantidos por compatibilidade com MIPS)
     CONTROL_TABLE = {
         # R-Type (Rd <- ALU(Rs, Rt/0), RegDst=1, ALUSrc=0, RegWrite=1)
@@ -84,6 +89,7 @@ class CPU:
         # I_CONST (LUI, LLI) são tratados com ALUCode customizado ou lógica no EX
     }
 
+
     def __init__(self, instruction_memory: dict, registers_list: list, data_memory_list: list, initial_pc: int = 0):
         self.PC = initial_pc 
         
@@ -97,6 +103,9 @@ class CPU:
         self.IF_ID = {'PC_Next': 0, 'Instruction': '0'*32}
         self.ID_EX = self._get_nop_latch('ID_EX') 
         self.EXMEM_WB = self._get_nop_latch('EXMEM_WB') 
+        
+        # NOVO: Variável para exibir corretamente o estágio WB
+        self.WB_STAGE_MNEMONIC = '---' 
 
         self.clock_cycle = 0
         self.running = True
@@ -123,18 +132,18 @@ class CPU:
         return op_info['name']
 
     def _print_pipeline_state(self):
-        """Imprime o estado atual de cada estágio do pipeline."""
+        """Imprime o estado atual de cada estágio do pipeline (corrigido para WB)."""
         name_if_id = self._get_instruction_name(self.IF_ID['Instruction'])
         name_id_ex = self.ID_EX['Control_Signals']['Mnemonic']
         name_exmem_wb = self.EXMEM_WB['Control_Signals']['Mnemonic']
         
-        # O WB contém a instrução que acabou de passar pelo EXMEM_WB
-        name_wb = name_exmem_wb if name_exmem_wb != 'NOP' else '---'
+        # Usa o mnemônico do estágio WB, que é atrasado em um ciclo no self.step()
+        name_wb = self.WB_STAGE_MNEMONIC
 
         print(f"| Instrução: | {name_if_id:<8} | {name_id_ex:<8} | {name_exmem_wb:<8} | {name_wb:<8} |")
 
-    # --- ESTÁGIOS DO PIPELINE ---
-
+    # --- ESTÁGIOS DO PIPELINE (fetch, decode, e execute_and_memory_access permanecem iguais) ---
+    
     def fetch(self):
         """Estágio IF: Busca a Instrução."""
         if not self.running: return
@@ -261,6 +270,7 @@ class CPU:
         """Estágio WB: Escreve o Resultado no Banco de Registradores e Checa HALT."""
         if not self.running: return
 
+        # A instrução que está para ser escrita (que acabou de sair do EX/MEM)
         ctrl = self.EXMEM_WB['Control_Signals']
         
         # 0. HALT Check: Desliga a simulação
@@ -281,9 +291,23 @@ class CPU:
         
     def step(self):
         """Executa um ciclo de relógio, movendo todas as instruções um estágio."""
-        self.write_back()
+        
+        # --- NOVO: SALVA O MNEMÔNICO QUE ESTÁ PARA ENTRAR NO WB ---
+        # A instrução no EXMEM_WB LATCH é a que executa WB neste ciclo
+        self.WB_STAGE_MNEMONIC = self.EXMEM_WB['Control_Signals']['Mnemonic']
+        if self.WB_STAGE_MNEMONIC == 'NOP':
+             self.WB_STAGE_MNEMONIC = '---'
+        
+        # 1. Executa a escrita no Banco de Registradores (WB)
+        self.write_back() 
+
+        # 2. Executa EX/MEM (sobrescreve EXMEM_WB com a nova instrução)
         self.execute_and_memory_access()
+
+        # 3. Executa ID
         self.decode()
+
+        # 4. Executa IF
         self.fetch()
         
         self.clock_cycle += 1
@@ -291,8 +315,8 @@ class CPU:
     def run(self):
         """Roda a simulação."""
         print("\n--- INÍCIO DA SIMULAÇÃO ---")
-        print("| Estágio:     | IF       | ID       | EX/MEM   | WB       |")
-        print("| Latch:       | IF/ID    | ID/EX    | EXMEM/WB | WB       |")
+        print("| Estágio:     | IF       | ID       | EX/MEM   | WB       |")
+        print("| Latch:       | IF/ID    | ID/EX    | EXMEM/WB | WB       |")
         print("+" + "-"*56 + "+")
 
         while self.running and self.clock_cycle < 100: 
