@@ -3,8 +3,6 @@ ADDI R2, R0, 3
 MUL R3, R1, R2
 
 BEQ R3, R2, 24
-
-
 ADDI R4, R3, 1
 
 J 28
@@ -12,11 +10,8 @@ J 28
 ADDI R4, R0, 999
 
 ADDI R10, R0, 4
-
 LW R5, R10
-
 SW R10, R3
-
 LW R6, R10
 
 XOR R7, R6, R1

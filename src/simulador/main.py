@@ -46,7 +46,7 @@ def load_program_bin(file_path_bin: str) -> tuple:
 
 def main():
     
-    ASSEMBLY_SOURCE = 'exemplos/teste_hazard.asm'
+    ASSEMBLY_SOURCE = 'exemplos/teste_jump_to_branch.asm'
     base_name = os.path.basename(ASSEMBLY_SOURCE).replace('.asm', '')
     BINARY_OUTPUT_BIN = os.path.join('binarios', f'{base_name}.bin')
     BINARY_OUTPUT_TXT = os.path.join('binarios', f'{base_name}.txt')
