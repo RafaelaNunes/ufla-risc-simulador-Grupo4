@@ -2,8 +2,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-binarios/*.bin
-binarios/*.txt
+*.bin
+*.txt
+binarios/*
+!binarios/.gitkeep
 
 .DS_Store
 Thumbs.db
