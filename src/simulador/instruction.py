@@ -1,119 +1,133 @@
 # src/simulador/instruction.py
 
-# ==============================================================================
-# Funções de Conversão e Auxiliares
-# ==============================================================================
+# ====================================================================
+# Funções auxiliares
+# ====================================================================
 
 def bin_to_int(binary_str: str) -> int:
-    """Converte string binária para inteiro, tratando o bit de sinal (complemento de dois)."""
+    """Converte string binária para inteiro, tratando sinal (2's complement)."""
     if not binary_str:
         return 0
-    
-    # Preenche para 32 bits (padrão do pipeline)
-    while len(binary_str) < 32:
-        binary_str = binary_str[0] + binary_str # Estende o bit de sinal
+    # Garante 32 bits
+    if len(binary_str) < 32:
+        # estende pelo bit de sinal
+        sign = binary_str[0]
+        binary_str = sign * (32 - len(binary_str)) + binary_str
 
-    # Verifica se é negativo (bit mais significativo é 1)
     if binary_str[0] == '1':
-        # Converte para complemento de dois
-        # 1. Inverte todos os bits
-        inverted_bits = ''.join(['1' if b == '0' else '0' for b in binary_str])
-        # 2. Soma 1 e inverte o sinal
-        return -(int(inverted_bits, 2) + 1)
+        # complemento de dois
+        inverted = ''.join('1' if b == '0' else '0' for b in binary_str)
+        return -(int(inverted, 2) + 1)
     else:
         return int(binary_str, 2)
 
+
 def reg_to_bin(reg_str: str) -> str:
-    """Converte nome de registrador (R0 a R15) para binário de 4 bits."""
+    """Converte 'R<num>' para 4 bits (0..15)."""
     try:
         reg_num = int(reg_str[1:])
-        if 0 <= reg_num <= 15:
-            return format(reg_num, '04b')
-        else:
-            raise ValueError("Número do registrador fora do intervalo (0-15).")
-    except (ValueError, IndexError):
+        if not (0 <= reg_num <= 15):
+            raise ValueError
+        return format(reg_num, '04b')
+    except Exception:
         raise ValueError(f"Formato de registrador inválido: {reg_str}")
 
-# ==============================================================================
-# Definição e Decodificação das Instruções
-# ==============================================================================
 
-# --- DEFINIÇÃO COMPLETA DE INSTRUÇÕES (UFLA-RISC) ---
+# ====================================================================
+# MAPA DE OPCODES E DECODIFICAÇÃO
+# ====================================================================
+# Mantive os opcodes já existentes e adicionei os novos para controle.
+# Escolhi códigos não usados anteriormente.
 OPCODE_MAP = {
-    # 1. Tipo R (0-12)
-    '00000001': {'name': 'ADD', 'type': 'R'}, '00000010': {'name': 'SUB', 'type': 'R'},
-    '00000011': {'name': 'ZERO', 'type': 'R'}, '00000100': {'name': 'XOR', 'type': 'R'},
-    '00000101': {'name': 'OR', 'type': 'R'}, '00000110': {'name': 'NOT', 'type': 'R'},
-    '00000111': {'name': 'AND', 'type': 'R'}, '00001000': {'name': 'SLA', 'type': 'R'},
-    '00001001': {'name': 'SRA', 'type': 'R'}, '00001010': {'name': 'SLL', 'type': 'R'},
-    '00001011': {'name': 'SRL', 'type': 'R'}, '00001100': {'name': 'COPY', 'type': 'R'},
-    
-    # NOVOS R-Type (20, 21, 27)
-    '00010100': {'name': 'MUL', 'type': 'R'},  # 20
-    '00010101': {'name': 'DIV', 'type': 'R'},  # 21
-    '00011011': {'name': 'NOR', 'type': 'R'},  # 27
+    # R-Type (existentes)
+    '00000001': {'name': 'ADD', 'type': 'R'},
+    '00000010': {'name': 'SUB', 'type': 'R'},
+    '00000011': {'name': 'ZERO', 'type': 'R'},
+    '00000100': {'name': 'XOR', 'type': 'R'},
+    '00000101': {'name': 'OR', 'type': 'R'},
+    '00000110': {'name': 'NOT', 'type': 'R'},
+    '00000111': {'name': 'AND', 'type': 'R'},
+    '00001000': {'name': 'SLA', 'type': 'R'},
+    '00001001': {'name': 'SRA', 'type': 'R'},
+    '00001010': {'name': 'SLL', 'type': 'R'},
+    '00001011': {'name': 'SRL', 'type': 'R'},
+    '00001100': {'name': 'COPY', 'type': 'R'},
+    # novos R
+    '00001101': {'name': 'JR', 'type': 'R'},   # JR (usará campo Rs para registrar alvo)
 
-    # 2. Instruções Aritméticas Imediatas (I_ARITH) 
-    # Opcodes Originais (24, 25)
-    '00011000': {'name': 'ADDI', 'type': 'I_ARITH'}, # 24
-    '00011001': {'name': 'SUBI', 'type': 'I_ARITH'}, # 25
+    # R-type extras
+    '00010100': {'name': 'MUL', 'type': 'R'},
+    '00010101': {'name': 'DIV', 'type': 'R'},
+    '00011011': {'name': 'NOR', 'type': 'R'},
 
-    # NOVOS I-ARITH (22, 23, 28)
-    '00010110': {'name': 'MULI', 'type': 'I_ARITH'}, # 22
-    '00010111': {'name': 'ANDI', 'type': 'I_ARITH'}, # 23
-    '00011100': {'name': 'SLTI', 'type': 'I_ARITH'}, # 28
-    
-    # 3. Instruções de Constante (I_CONST)
-    '00001110': {'name': 'LUI', 'type': 'I_CONST'},   # 14
-    '00011010': {'name': 'LLI', 'type': 'I_CONST'},   # 26
+    # I-ARITH
+    '00011000': {'name': 'ADDI', 'type': 'I_ARITH'},
+    '00011001': {'name': 'SUBI', 'type': 'I_ARITH'},
+    '00010110': {'name': 'MULI', 'type': 'I_ARITH'},
+    '00010111': {'name': 'ANDI', 'type': 'I_ARITH'},
+    '00011100': {'name': 'SLTI', 'type': 'I_ARITH'},
 
-    # 4. Instruções de Memória (I_MEM)
-    '00010000': {'name': 'LW', 'type': 'I_MEM'},# 16
-    '00010001': {'name': 'SW', 'type': 'I_MEM'},# 17
-    
-    # 5. Controle
-    '00000000': {'name': 'NOP', 'type': 'NOP'},
-    '11111111': {'name': 'HALT', 'type': 'HALT'}
+    # Logical R-types
+    '00000101': {'name': 'OR', 'type': 'R'},
+    '00000111': {'name': 'AND', 'type': 'R'},
+
+    # I-CONST / I-MEM
+    '00001110': {'name': 'LUI', 'type': 'I_CONST'},
+    '00011010': {'name': 'LLI', 'type': 'I_CONST'},
+    '00010000': {'name': 'LW', 'type': 'I_MEM'},
+    '00010001': {'name': 'SW', 'type': 'I_MEM'},
+
+    # CONTROLE (novas instruções de salto/branch)
+    # JEQ: jump if equal (I-style: Rt, Rs, Imm)
+    '00011101': {'name': 'JEQ', 'type': 'I_BRANCH'},
+    # JNE: jump if not equal
+    '00011110': {'name': 'JNE', 'type': 'I_BRANCH'},
+    # J: jump absolute (imm target)
+    '00011111': {'name': 'J', 'type': 'I_BRANCH'},
+    # JAL: jump and link (salva o PC+1 em R15)
+    '00100000': {'name': 'JAL', 'type': 'I_BRANCH'},
+    # HALT / NOP
+    '11111111': {'name': 'HALT', 'type': 'HALT'},
+    '00000000': {'name': 'NOP', 'type': 'NOP'}
 }
 
+
 def decode_instruction(instruction_binary: str) -> dict:
-    """Decodifica uma instrução binária de 32 bits, retornando seus campos."""
-    
+    """Decodifica instrução de 32 bits e retorna campos."""
+    if not instruction_binary or len(instruction_binary) < 8:
+        raise ValueError("Instrução inválida/curta.")
+
     opcode = instruction_binary[0:8]
     op_info = OPCODE_MAP.get(opcode)
-
     if not op_info:
         raise ValueError(f"Opcode não reconhecido: {opcode}")
 
     decoded = {'Opcode': opcode, 'Mnemonic': op_info['name'], 'Type': op_info['type']}
 
-    if op_info['type'] in ['R', 'I_ARITH', 'I_MEM']:
-        # Campos genéricos (R-Type: Rd/Rs/Rt, I-Type: Rt/Rs/Imm)
-        F1 = instruction_binary[8:12]  # Rd (R) ou Rt (I)
-        F2 = instruction_binary[12:16] # Rs
-        F3 = instruction_binary[16:32] # Rt (R) ou Imm (I)
+    if op_info['type'] in ['R', 'I_ARITH', 'I_MEM', 'I_BRANCH']:
+        F1 = instruction_binary[8:12]   # Rd (R) ou Rt (I)
+        F2 = instruction_binary[12:16]  # Rs
+        F3 = instruction_binary[16:32]  # Rt (R) ou Imm (I)
 
         decoded['Rs'] = int(F2, 2)
-        
+
         if op_info['type'] == 'R':
-            # Formato R: OP | Rd | Rs | Rt
+            # R: OP | Rd(4) | Rs(4) | Rt(4) + fill(12)
             decoded['Rd'] = int(F1, 2)
             decoded['Rt'] = int(F3[0:4], 2)
-        else: # I_ARITH, I_MEM
-            # Formato I: OP | Rt | Rs | Imm
+        else:
+            # I_ARITH, I_MEM, I_BRANCH: OP | Rt(4) | Rs(4) | Imm(16)
             decoded['Rt'] = int(F1, 2)
-            # Immediato é um valor de 16 bits
-            decoded['Immediate'] = bin_to_int(F3) 
+            # imediato de 16 bits (com sinal)
+            decoded['Immediate'] = bin_to_int(F3)
 
     elif op_info['type'] == 'I_CONST':
-        # Formato I_CONST: OP | Rt | Imm_H (8) | Imm_L (8)
+        # OP | Rt(4) | Imm_H(8) | Imm_L(8)
         F1 = instruction_binary[8:12]  # Rt
-        F2 = instruction_binary[12:20] # Imm_H
-        F3 = instruction_binary[20:28] # Imm_L
-
+        F2 = instruction_binary[12:20]  # Imm_H (8)
+        F3 = instruction_binary[20:28]  # Imm_L (8) -- decode original usava 12bits, mas adaptamos
         decoded['Rt'] = int(F1, 2)
-        # O valor imediato completo é 16 bits, não assinado.
-        imm_16_bin = F2 + F3
-        decoded['Immediate'] = int(imm_16_bin, 2)
+        imm_16 = F2 + F3  # 16 bits
+        decoded['Immediate'] = int(imm_16, 2)
 
     return decoded

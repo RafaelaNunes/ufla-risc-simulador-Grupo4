@@ -1,9 +1,8 @@
 # src/simulador/cpu.py
+
 from .instruction import decode_instruction, bin_to_int
 
-# -----------------------
-# Print helpers (unchanged)
-# -----------------------
+# ----------------------- helpers de impressão -----------------------
 def print_registers(reg_file):
     print("-----------------------------------------")
     for i in range(16):
@@ -18,9 +17,7 @@ def print_memory_data(data_memory, limit_words=4):
     print("-----------------------------------------")
 
 
-# -----------------------
-# Memory / RegisterFile / PipelineRegister
-# -----------------------
+# ----------------------- estruturas -----------------------
 class DataMemory:
     def __init__(self, initial_data_list: list = None):
         self.memory = initial_data_list if initial_data_list is not None else [0] * 1024
@@ -68,9 +65,7 @@ class PipelineRegister:
         self.data.update(source.data)
 
 
-# -----------------------
-# ALU (mantive como estava; se quiser, habilito mais ops)
-# -----------------------
+# ----------------------- ALU -----------------------
 class ALU:
     R_TYPE_ALU_CODES = {
         'ADD': 0b0000, 'SUB': 0b0001, 'ZERO': 0b0010, 'XOR': 0b0011, 'OR': 0b0100,
@@ -92,42 +87,49 @@ class ALU:
         elif operation_code == ALU.R_TYPE_ALU_CODES['OR']: res = input_a | input_b
         elif operation_code == ALU.R_TYPE_ALU_CODES['XOR']: res = input_a ^ input_b
         elif operation_code == ALU.R_TYPE_ALU_CODES['NOT']: res = ~input_a
-        # shifts (basic)
         elif operation_code == ALU.R_TYPE_ALU_CODES['SLL']: res = (input_a << (input_b & 0x1F))
         elif operation_code == ALU.R_TYPE_ALU_CODES['SRL']: res = ((input_a & 0xFFFFFFFF) >> (input_b & 0x1F))
         elif operation_code == ALU.R_TYPE_ALU_CODES['SRA']: res = (input_a >> (input_b & 0x1F))
-
         return bin_to_int(format(res & 0xFFFFFFFF, '032b'))
 
 
-# -----------------------
-# CPU
-# -----------------------
+# ----------------------- CPU -----------------------
 class CPU:
-    # CONTROL_TABLE kept as in your version (mapping opcodes to control signals)
     CONTROL_TABLE = {
         # R-Type
-        '00000001': [1,0,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['ADD']], # ADD
-        '00001100': [1,0,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['COPY']],
+        '00000001': [1,0,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['ADD']], 
+        '00001100': [1,0,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['COPY']], 
         '00010100': [1,0,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['MUL']],
         '00010101': [1,0,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['DIV']],
         '00011011': [1,0,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['NOR']],
+        '00001101': [0,0,0,0,0,0,0,0,0, 0],  # JR - handled specially
+
         # I-ARITH
         '00011000': [0,1,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['ADD']], # ADDI
         '00011001': [0,1,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['SUB']], # SUBI
         '00010110': [0,1,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['MUL']], # MULI
         '00010111': [0,1,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['AND']], # ANDI
         '00011100': [0,1,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['SLT']], # SLTI
+
         '00000100': [1,0,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['XOR']],
         '00000101': [1,0,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['OR']],
         '00000111': [1,0,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['AND']],
+
         # I-CONST / I-MEM
         '00001110': [0,1,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['COPY']],
         '00011010': [0,1,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['COPY']],
         '00010000': [0,1,1,1,1,0,0,0,0, ALU.R_TYPE_ALU_CODES['ADD']], # LW
         '00010001': [0,1,0,0,0,1,0,0,0, ALU.R_TYPE_ALU_CODES['ADD']], # SW
-        '11111111': [0,0,0,0,0,0,0,0,0,0], # HALT
-        '00000000': [0,0,0,0,0,0,0,0,0,0], # NOP
+
+        # Control-flow opcodes (JEQ,JNE,J,JAL)
+        '00011101': [0,0,0,0,0,0,1,0,0,0],  # JEQ (Branch)
+        '00011110': [0,0,0,0,0,0,1,0,0,0],  # JNE
+        '00011111': [0,0,0,0,0,0,0,0,0,0],  # J (handled specially)
+        '00100000': [0,0,0,1,0,0,0,0,0,0],  # JAL -> RegWrite set (link in R15)
+
+        # HALT / NOP
+        '11111111': [0,0,0,0,0,0,0,0,0,0],
+        '00000000': [0,0,0,0,0,0,0,0,0,0]
     }
 
     def __init__(self, instruction_mem_dict: dict, registers_list: list, data_memory_list: list):
@@ -147,13 +149,12 @@ class CPU:
 
         self.registers = self.reg_file
 
-        # pipeline latches
         self.if_id_latch = PipelineRegister()
         self.id_ex_latch = PipelineRegister()
         self.ex_mem_latch = PipelineRegister()
         self.mem_wb_latch = PipelineRegister()
 
-    # Fetch stage (IF)
+    # IF stage
     def fetch(self):
         if not self.running:
             self.if_id_latch.reset()
@@ -164,12 +165,13 @@ class CPU:
             self.if_id_latch.data['Instruction'] = ins
             self.if_id_latch.data['PC'] = self.PC
             self.if_id_latch.data['PC_Next'] = self.PC + 4
+            # IMPORTANT: advance PC for next fetch; if branch taken later, step() will override PC
             self.PC += 4
         else:
             self.if_id_latch.reset()
             self.running = False
 
-    # Decode stage (ID) - reads regs and sets ID/EX latch
+    # ID stage
     def decode(self, if_id_latch: dict):
         instr_bin = if_id_latch.get('Instruction', '0'*32)
         try:
@@ -186,7 +188,7 @@ class CPU:
         rs_val = self.reg_file.read(decoded.get('Rs', 0))
         rt_val = self.reg_file.read(decoded.get('Rt', 0))
 
-        # Update ID/EX latch
+        # Save PC_Next so EX can use it for JAL link value
         self.id_ex_latch.data.update({
             'PC_Next': if_id_latch.get('PC_Next', 0),
             'Mnemonic': decoded.get('Mnemonic'),
@@ -200,74 +202,115 @@ class CPU:
         })
         return self.id_ex_latch.data
 
-    # Execute + Memory Access (EX / MEM)
-    def execute_and_memory_access(self, id_ex_latch: dict):
+    # EX/MEM stage implemented as a pure function that RETURNS dict (não atualiza latches diretamente)
+    def execute_and_memory_access(self, id_ex_latch: dict) -> dict:
+        if not id_ex_latch or id_ex_latch.get('Mnemonic') in (None, 'NOP'):
+            return {
+                'Ctrl': [0]*10, 'ALU_Result': 0, 'Mem_Data': 0,
+                'Write_Reg_Addr': 0, 'Mnemonic': 'NOP', 'JumpTaken': False
+            }
+
         ctrl = id_ex_latch.get('Ctrl', [0]*10)
-        # Determine destination register for this instruction (as ID/EX provides)
+        mnemonic = id_ex_latch.get('Mnemonic', 'NOP')
+
+        # decide write register (normal)
+        # If JAL, we will override write_reg_addr to R15 (link)
         write_reg_addr = id_ex_latch.get('Rd') if ctrl[0] == 1 else id_ex_latch.get('Rt')
 
-        # Prepare ALU inputs with forwarding
+        # prepare ALU inputs with forwarding from mem_wb and ex_mem (READ ONLY)
         rs = id_ex_latch.get('Rs', 0)
         rt = id_ex_latch.get('Rt', 0)
         alu_a = id_ex_latch.get('Rs_Val', 0)
         alu_b = id_ex_latch.get('Rt_Val', 0)
 
-        # Forwarding from MEM/WB
-        wb_write_reg = self.mem_wb_latch.data.get('Write_Reg_Addr', 0)
+        # forwarding from MEM/WB (if any)
+        wb_wr = self.mem_wb_latch.data.get('Write_Reg_Addr', 0)
         wb_reg_write = self.mem_wb_latch.data.get('Ctrl', [0]*10)[3]
-        if wb_reg_write and wb_write_reg != 0:
+        if wb_reg_write and wb_wr != 0:
             data_wb = self.mem_wb_latch.data['Mem_Data'] if self.mem_wb_latch.data['Ctrl'][2] == 1 else self.mem_wb_latch.data['ALU_Result']
-            if rs == wb_write_reg:
+            if rs == wb_wr:
                 alu_a = data_wb
-            if rt == wb_write_reg and ctrl[1] == 0:
+            if rt == wb_wr and ctrl[1] == 0:
                 alu_b = data_wb
 
-        # Forwarding from EX/MEM
-        ex_write_reg = self.ex_mem_latch.data.get('Write_Reg_Addr', 0)
+        # forwarding from EX/MEM (previous cycle's ex_mem_latch)
+        ex_wr = self.ex_mem_latch.data.get('Write_Reg_Addr', 0)
         ex_reg_write = self.ex_mem_latch.data.get('Ctrl', [0]*10)[3]
-        if ex_reg_write and ex_write_reg != 0:
+        if ex_reg_write and ex_wr != 0:
             data_ex = self.ex_mem_latch.data.get('ALU_Result', 0)
-            if rs == ex_write_reg:
+            if rs == ex_wr:
                 alu_a = data_ex
-            if rt == ex_write_reg and ctrl[1] == 0:
+            if rt == ex_wr and ctrl[1] == 0:
                 alu_b = data_ex
 
-        # ALUSrc selects immediate
+        # ALUSrc immediato
         if ctrl[1] == 1:
             alu_b = id_ex_latch.get('Immediate', 0)
 
-        # Special cases LUI/LLI
-        if id_ex_latch.get('Mnemonic') == 'LUI':
+        # treat LUI/LLI specially
+        if mnemonic == 'LUI':
             alu_result = (id_ex_latch.get('Immediate', 0) << 16) & 0xFFFFFFFF
-        elif id_ex_latch.get('Mnemonic') == 'LLI':
+        elif mnemonic == 'LLI':
             alu_result = id_ex_latch.get('Immediate', 0) & 0xFFFFFFFF
         else:
             alu_result = ALU.execute(ctrl[9], alu_a, alu_b)
 
         mem_data = 0
-        # Memory access
-        if ctrl[4] == 1: # MemRead = LW
+        if ctrl[4] == 1:  # LW
             mem_data = self.data_memory.read_word(alu_result)
-        elif ctrl[5] == 1: # MemWrite = SW
-            # SW writes Rt_Val (original value from ID/EX) to memory
+        elif ctrl[5] == 1:  # SW
             self.data_memory.write_word(alu_result, id_ex_latch.get('Rt_Val', 0))
 
-        # Update EX/MEM latch
-        self.ex_mem_latch.data.update({
-            'Ctrl': ctrl, 'ALU_Result': alu_result, 'Mem_Data': mem_data,
-            'Write_Reg_Addr': write_reg_addr, 'Mnemonic': id_ex_latch.get('Mnemonic')
-        })
-        return self.ex_mem_latch.data
+        # Control-flow handling: JEQ, JNE, J, JAL, JR
+        jump_taken = False
+        next_pc = None
+        # For JEQ/JNE: Rs and Rt are compared; Immediate is absolute byte address
+        if mnemonic == 'JEQ':
+            # compare original register values (alu_a / alu_b already forwarded)
+            if alu_a == alu_b:
+                jump_taken = True
+                next_pc = id_ex_latch.get('Immediate', 0)
+        elif mnemonic == 'JNE':
+            if alu_a != alu_b:
+                jump_taken = True
+                next_pc = id_ex_latch.get('Immediate', 0)
+        elif mnemonic == 'J':
+            jump_taken = True
+            next_pc = id_ex_latch.get('Immediate', 0)
+        elif mnemonic == 'JAL':
+            # save link in R15 (last register) -> value = PC_Next (word address? we'll store byte PC_Next)
+            link_value = id_ex_latch.get('PC_Next', 0)
+            # schedule writing R15 in WB by setting write_reg_addr to 15 and ALU_Result to link value
+            write_reg_addr = 15
+            alu_result = link_value
+            jump_taken = True
+            next_pc = id_ex_latch.get('Immediate', 0)
+        elif mnemonic == 'JR':
+            # JR: Rs contains the register with target address; use Rs value (already in alu_a)
+            jump_taken = True
+            next_pc = alu_a  # alu_a contains Rs_Val (with forwarding applied)
 
-    # Write Back (WB) uses mem_wb_latch
-    def write_back(self, mem_wb_latch_data: dict):
-        ctrl = mem_wb_latch_data.get('Ctrl', [0]*10)
-        if ctrl[3] == 1: # RegWrite
-            data_to_write = mem_wb_latch_data.get('Mem_Data') if ctrl[2] == 1 else mem_wb_latch_data.get('ALU_Result')
-            self.reg_file.write(mem_wb_latch_data.get('Write_Reg_Addr', 0), data_to_write)
-        # no latch copy here; copy happens in step() after execute
+        # if a jump was taken, prepare ex_mem result with JumpTaken & NextPC fields
+        result = {
+            'Ctrl': ctrl,
+            'ALU_Result': alu_result,
+            'Mem_Data': mem_data,
+            'Write_Reg_Addr': write_reg_addr,
+            'Mnemonic': mnemonic,
+            'JumpTaken': jump_taken,
+            'NextPC': next_pc  # may be None if not taken
+        }
+        return result
 
-    # Print pipeline state
+    # WB stage (only uses mem_wb_latch content)
+    def write_back(self, mem_wb_latch: dict):
+        if not mem_wb_latch:
+            return
+        ctrl = mem_wb_latch.get('Ctrl', [0]*10)
+        if ctrl[3] == 1:
+            data_to_write = mem_wb_latch.get('Mem_Data') if ctrl[2] == 1 else mem_wb_latch.get('ALU_Result')
+            self.reg_file.write(mem_wb_latch.get('Write_Reg_Addr', 0), data_to_write)
+
     def _print_pipeline_state(self):
         try:
             if_id_mnem = decode_instruction(self.if_id_latch.data['Instruction']).get('Mnemonic', 'NOP')
@@ -279,93 +322,86 @@ class CPU:
         print(f"| Instrução:  | {if_id_mnem:<8} | {id_ex_mnem:<8} | {ex_mem_mnem:<8} | {wb_mnem:<8} |")
         print("+" + "-"*56 + "+")
 
-    # Hazard detection: decodes IF/ID to read Rs/Rt and compares with ID/EX (EX stage) and EX/MEM (MEM stage)
     def check_for_data_hazard(self) -> bool:
-        # decode IF/ID to know which regs the upcoming instruction will read
         try:
             decoded_if = decode_instruction(self.if_id_latch.data.get('Instruction', '0'*32))
         except Exception:
             return False
-
         id_rs = decoded_if.get('Rs', -1)
         id_rt = decoded_if.get('Rt', -1)
-
-        # EX stage (instruction in ID/EX)
         ex_ctrl = self.id_ex_latch.data.get('Ctrl', [0]*10)
         ex_write_reg = self.id_ex_latch.data.get('Rd') if ex_ctrl[0] == 1 else self.id_ex_latch.data.get('Rt')
         ex_reg_write = ex_ctrl[3]
-        ex_mem_read = ex_ctrl[4] # LW
-
-        # MEM stage (instruction in EX/MEM)
-        mem_ctrl = self.ex_mem_latch.data.get('Ctrl', [0]*10)
-        mem_write_reg = self.ex_mem_latch.data.get('Write_Reg_Addr', -1)
-        mem_reg_write = mem_ctrl[3]
-
-        # 1) Load-use hazard: ID depends on result of LW in EX (ID/EX)
+        ex_mem_read = ex_ctrl[4]  # LW
+        # EX load-use hazard
         if ex_mem_read and ex_write_reg > 0:
             if ex_write_reg == id_rs or ex_write_reg == id_rt:
                 return True
-
-        # 2) RAW with EX (if EX writes a reg that ID reads) -- if forwarding covers ALU-ALU this may be unnecessary,
-        # but keep a conservative check: if ex writes and it's used by ID, stall one cycle unless forwarding handled it.
-        if ex_reg_write and ex_write_reg > 0:
-            if ex_write_reg == id_rs or ex_write_reg == id_rt:
-                # If the EX stage is producing ALU result (not LW), forwarding can handle it, so usually no stall.
-                # But if your forwarding handles EX->ID, we can skip. For safety, do NOT stall ALU-ALU (forwarded).
-                # We'll not stall here because we have forwarding implemented.
-                pass
-
-        # 3) RAW with MEM stage (EX/MEM) — if MEM stage will write and ID reads same reg, stall only if necessary
-        if mem_reg_write and mem_write_reg > 0:
-            if mem_write_reg == id_rs or mem_write_reg == id_rt:
-                # mem stage is about to write (maybe from LW); if it is LW (MemToReg), the data is only available in WB,
-                # but we have forwarding from MEM -> EX; so in many cases forwarding suffices. We'll conservatively not stall.
-                pass
-
         return False
 
-    # Single cycle step (advances pipeline correctly)
     def step(self):
-        # 1) WRITE BACK stage (uses mem_wb_latch contents)
+        # next latches (temporary)
+        next_if_id = PipelineRegister()
+        next_id_ex = PipelineRegister()
+        next_ex_mem = PipelineRegister()
+        next_mem_wb = PipelineRegister()
+
+        # 1) WB uses mem_wb_latch (old)
         self.write_back(self.mem_wb_latch.data)
 
-        # 2) EXECUTE / MEMORY (operate on ID/EX to produce EX/MEM)
-        self.execute_and_memory_access(self.id_ex_latch.data)
+        # 2) EX compute result for next_ex_mem (but do NOT update latches yet)
+        ex_result = self.execute_and_memory_access(self.id_ex_latch.data)
+        next_ex_mem.data.update(ex_result)
 
-        # 3) Hazard detection (decide whether to stall the pipeline)
+        # 3) detect hazard (based on state before updating latches)
         stall = self.check_for_data_hazard()
 
+        # 4) ID stage (if stall -> bubble)
         if stall:
-            # Insert bubble in ID/EX (stall), do NOT call decode() or fetch()
-            self.id_ex_latch.reset()
-            # PC was already incremented by previous fetch; to avoid advancing we must roll it back
-            # BUT in our design fetch is only called when not stalled (see run/step logic). So we must ensure fetch wasn't called.
-            # Here we assume fetch will only run when not stalled (run() enforces that).
-            # If your fetch has already run earlier in the cycle, you'd need to decrement PC here.
-            # To be safe, we ensure PC does not advance further by not calling fetch below.
-            pass
+            next_id_ex.reset()
+            # hold IF/ID (do not fetch)
+            next_if_id.data.update(self.if_id_latch.data)
         else:
-            # Normal flow: decode the instruction at IF/ID and fetch next instruction
-            self.decode(self.if_id_latch.data)
+            id_out = self.decode(self.if_id_latch.data)
+            next_id_ex.data.update(id_out)
+            # 5) IF stage (fetch next instruction)
             self.fetch()
+            next_if_id.data.update(self.if_id_latch.data)
 
-        # 4) Advance pipeline: move EX/MEM -> MEM/WB (copy for next cycle)
-        # Note: write_back used the previous mem_wb_latch content; now prepare mem_wb for next cycle.
-        self.mem_wb_latch.copy(self.ex_mem_latch)
+        # 6) If a jump was taken in EX stage: perform branch actions (flush)
+        jump_taken = ex_result.get('JumpTaken', False)
+        if jump_taken:
+            # set new PC to next_pc
+            next_pc = ex_result.get('NextPC')
+            if next_pc is not None:
+                # NextPC is a byte address (assembler provided)
+                self.PC = next_pc
+            # flush IF and ID (invalidate the instructions fetched after branch)
+            next_if_id.reset()
+            next_id_ex.reset()
 
+        # 7) next MEM/WB gets content of next_ex_mem (the result just computed)
+        next_mem_wb.data.update(next_ex_mem.data)
+
+        # 8) Update all latches simultaneously
+        self.if_id_latch.data.update(next_if_id.data)
+        self.id_ex_latch.data.update(next_id_ex.data)
+        self.ex_mem_latch.data.update(next_ex_mem.data)
+        self.mem_wb_latch.data.update(next_mem_wb.data)
+
+        # increment clock
         self.clock_cycle += 1
 
-    # Run loop
     def run(self):
         print("\n--- INÍCIO DA EXECUÇÃO DO PIPELINE ---")
         print("| Estágio:     | IF       | ID       | EX/MEM   | WB       |")
         print("| Latch:       | IF/ID    | ID/EX    | EXMEM/WB | WB       |")
         print("+" + "-"*56 + "+")
-        cycles_after_stop = 0
 
-        # Initialize by fetching the first instruction
+        # initial fetch
         self.fetch()
 
+        cycles_after_stop = 0
         while (self.running or cycles_after_stop < 4) and self.clock_cycle < 1000:
             if self.clock_cycle > 0:
                 pc_current_if = self.if_id_latch.data.get('PC', self.PC)
