@@ -1,14 +1,9 @@
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
 
-venv/
-env/
-.env
+binarios/*.bin
+binarios/*.txt
 
 .DS_Store
-.vscode/
-.idea/
-
-*.log
+Thumbs.db

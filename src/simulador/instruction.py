@@ -1,133 +1,138 @@
 # src/simulador/instruction.py
 
-# ====================================================================
-# Funções auxiliares
-# ====================================================================
-
 def bin_to_int(binary_str: str) -> int:
     """Converte string binária para inteiro, tratando sinal (2's complement)."""
-    if not binary_str:
-        return 0
-    # Garante 32 bits
+    if not binary_str: return 0
     if len(binary_str) < 32:
-        # estende pelo bit de sinal
         sign = binary_str[0]
         binary_str = sign * (32 - len(binary_str)) + binary_str
-
     if binary_str[0] == '1':
-        # complemento de dois
         inverted = ''.join('1' if b == '0' else '0' for b in binary_str)
         return -(int(inverted, 2) + 1)
     else:
         return int(binary_str, 2)
 
-
-def reg_to_bin(reg_str: str) -> str:
-    """Converte 'R<num>' para 4 bits (0..15)."""
-    try:
-        reg_num = int(reg_str[1:])
-        if not (0 <= reg_num <= 15):
-            raise ValueError
-        return format(reg_num, '04b')
-    except Exception:
-        raise ValueError(f"Formato de registrador inválido: {reg_str}")
-
-
-# ====================================================================
-# MAPA DE OPCODES E DECODIFICAÇÃO
-# ====================================================================
-# Mantive os opcodes já existentes e adicionei os novos para controle.
-# Escolhi códigos não usados anteriormente.
+# Mapeamento estendido com suas instruções novas
 OPCODE_MAP = {
-    # R-Type (existentes)
+    # R-Type (Padrão UFLA)
     '00000001': {'name': 'ADD', 'type': 'R'},
     '00000010': {'name': 'SUB', 'type': 'R'},
-    '00000011': {'name': 'ZERO', 'type': 'R'},
+    '00000011': {'name': 'ZERO', 'type': 'R_SPECIAL'}, # ZERO Rc
     '00000100': {'name': 'XOR', 'type': 'R'},
     '00000101': {'name': 'OR', 'type': 'R'},
-    '00000110': {'name': 'NOT', 'type': 'R'},
+    '00000110': {'name': 'NOT', 'type': 'R_NOT'},      # NOT Rc, Ra
     '00000111': {'name': 'AND', 'type': 'R'},
     '00001000': {'name': 'SLA', 'type': 'R'},
     '00001001': {'name': 'SRA', 'type': 'R'},
     '00001010': {'name': 'SLL', 'type': 'R'},
     '00001011': {'name': 'SRL', 'type': 'R'},
-    '00001100': {'name': 'COPY', 'type': 'R'},
-    # novos R
-    '00001101': {'name': 'JR', 'type': 'R'},   # JR (usará campo Rs para registrar alvo)
-
-    # R-type extras
+    '00001100': {'name': 'COPY', 'type': 'R_COPY'},    # COPY Rc, Ra
+    
+    # NOVAS R-Type
     '00010100': {'name': 'MUL', 'type': 'R'},
     '00010101': {'name': 'DIV', 'type': 'R'},
     '00011011': {'name': 'NOR', 'type': 'R'},
+    
+    # I-CONST / I-MEM (Padrão UFLA)
+    '00001110': {'name': 'LUI', 'type': 'LCL'},  # Carrega Constante Alta
+    '00001111': {'name': 'LLI', 'type': 'LCL'},  # Carrega Constante Baixa
+    '00010000': {'name': 'LW', 'type': 'MEM'},   # LOAD Rc, Ra
+    '00010001': {'name': 'SW', 'type': 'MEM_S'}, # STORE Rc, Ra (Mem[Rc] = Ra)
 
-    # I-ARITH
-    '00011000': {'name': 'ADDI', 'type': 'I_ARITH'},
-    '00011001': {'name': 'SUBI', 'type': 'I_ARITH'},
-    '00010110': {'name': 'MULI', 'type': 'I_ARITH'},
-    '00010111': {'name': 'ANDI', 'type': 'I_ARITH'},
-    '00011100': {'name': 'SLTI', 'type': 'I_ARITH'},
+    # JUMPS (Padrão UFLA)
+    '00010010': {'name': 'JAL', 'type': 'J_LINK'}, # JAL Endereço
+    '00010011': {'name': 'JR', 'type': 'J_REG'},   # JR Rc
+    '00010100': {'name': 'BEQ', 'type': 'BRANCH'}, # BEQ Ra, Rb, End
+    '00010101': {'name': 'BNE', 'type': 'BRANCH'}, # BNE Ra, Rb, End
+    '00010110': {'name': 'J', 'type': 'JUMP'},     # J Endereço
 
-    # Logical R-types
-    '00000101': {'name': 'OR', 'type': 'R'},
-    '00000111': {'name': 'AND', 'type': 'R'},
+    # NOVAS IMEDIATAS (Adaptação Livre - Usaremos formato I-Type MIPS-like adaptado)
+    # Sugestão: Opcode(8) | Rt(8) | Rs(8) | Imm(8) -> Imm muito curto.
+    # Vamos usar: Opcode(8) | Rt(4)|Rs(4) | Imm(16) para as SUAS instruções novas apenas.
+    '00011000': {'name': 'ADDI', 'type': 'I_CUSTOM'},
+    '00011001': {'name': 'SUBI', 'type': 'I_CUSTOM'},
+    '00010110': {'name': 'MULI', 'type': 'I_CUSTOM'},
+    '00010111': {'name': 'ANDI', 'type': 'I_CUSTOM'},
+    '00011100': {'name': 'SLTI', 'type': 'I_CUSTOM'},
 
-    # I-CONST / I-MEM
-    '00001110': {'name': 'LUI', 'type': 'I_CONST'},
-    '00011010': {'name': 'LLI', 'type': 'I_CONST'},
-    '00010000': {'name': 'LW', 'type': 'I_MEM'},
-    '00010001': {'name': 'SW', 'type': 'I_MEM'},
-
-    # CONTROLE (novas instruções de salto/branch)
-    # JEQ: jump if equal (I-style: Rt, Rs, Imm)
-    '00011101': {'name': 'JEQ', 'type': 'I_BRANCH'},
-    # JNE: jump if not equal
-    '00011110': {'name': 'JNE', 'type': 'I_BRANCH'},
-    # J: jump absolute (imm target)
-    '00011111': {'name': 'J', 'type': 'I_BRANCH'},
-    # JAL: jump and link (salva o PC+1 em R15)
-    '00100000': {'name': 'JAL', 'type': 'I_BRANCH'},
-    # HALT / NOP
     '11111111': {'name': 'HALT', 'type': 'HALT'},
     '00000000': {'name': 'NOP', 'type': 'NOP'}
 }
 
-
 def decode_instruction(instruction_binary: str) -> dict:
-    """Decodifica instrução de 32 bits e retorna campos."""
-    if not instruction_binary or len(instruction_binary) < 8:
-        raise ValueError("Instrução inválida/curta.")
+    if not instruction_binary or len(instruction_binary) < 32:
+        return {'Mnemonic': 'NOP', 'Opcode': '00000000'}
 
     opcode = instruction_binary[0:8]
-    op_info = OPCODE_MAP.get(opcode)
-    if not op_info:
-        raise ValueError(f"Opcode não reconhecido: {opcode}")
+    op_info = OPCODE_MAP.get(opcode, {'name': 'UNKNOWN', 'type': 'UNKNOWN'})
+    t = op_info['type']
+    
+    decoded = {
+        'Opcode': opcode,
+        'Mnemonic': op_info['name'],
+        'Rs': 0, 'Rt': 0, 'Rd': 0, 'Immediate': 0
+    }
 
-    decoded = {'Opcode': opcode, 'Mnemonic': op_info['name'], 'Type': op_info['type']}
+    # Decodificação baseada nos Apêndices B (Campos de 8 bits)
+    # Padrão R: Opcode(31-24) | Ra(23-16) | Rb(15-8) | Rc(7-0)
+    ra = int(instruction_binary[8:16], 2)
+    rb = int(instruction_binary[16:24], 2)
+    rc = int(instruction_binary[24:32], 2)
 
-    if op_info['type'] in ['R', 'I_ARITH', 'I_MEM', 'I_BRANCH']:
-        F1 = instruction_binary[8:12]   # Rd (R) ou Rt (I)
-        F2 = instruction_binary[12:16]  # Rs
-        F3 = instruction_binary[16:32]  # Rt (R) ou Imm (I)
+    if t == 'R': # ADD, SUB, AND... (Rc = Ra op Rb)
+        decoded['Rs'] = ra # Fonte 1
+        decoded['Rt'] = rb # Fonte 2
+        decoded['Rd'] = rc # Destino
+        
+    elif t == 'R_NOT' or t == 'R_COPY': # NOT Rc, Ra / COPY Rc, Ra
+        decoded['Rs'] = ra
+        decoded['Rd'] = rc
+        
+    elif t == 'R_SPECIAL': # ZERO Rc
+        decoded['Rd'] = rc
 
-        decoded['Rs'] = int(F2, 2)
+    elif t == 'LCL': # LCL Rc, Const16
+        # Opcode(8) | Const16(23-8) | Rc(7-0)
+        # Nota: O PDF diz Const16 nos bits 23-8. Isso significa bits do meio.
+        const16 = int(instruction_binary[8:24], 2)
+        decoded['Rd'] = rc
+        decoded['Immediate'] = const16
 
-        if op_info['type'] == 'R':
-            # R: OP | Rd(4) | Rs(4) | Rt(4) + fill(12)
-            decoded['Rd'] = int(F1, 2)
-            decoded['Rt'] = int(F3[0:4], 2)
-        else:
-            # I_ARITH, I_MEM, I_BRANCH: OP | Rt(4) | Rs(4) | Imm(16)
-            decoded['Rt'] = int(F1, 2)
-            # imediato de 16 bits (com sinal)
-            decoded['Immediate'] = bin_to_int(F3)
+    elif t == 'MEM': # LOAD Rc, Ra (Rc = Mem[Ra])
+        decoded['Rs'] = ra # Endereço base
+        decoded['Rd'] = rc # Destino
 
-    elif op_info['type'] == 'I_CONST':
-        # OP | Rt(4) | Imm_H(8) | Imm_L(8)
-        F1 = instruction_binary[8:12]  # Rt
-        F2 = instruction_binary[12:20]  # Imm_H (8)
-        F3 = instruction_binary[20:28]  # Imm_L (8) -- decode original usava 12bits, mas adaptamos
-        decoded['Rt'] = int(F1, 2)
-        imm_16 = F2 + F3  # 16 bits
-        decoded['Immediate'] = int(imm_16, 2)
+    elif t == 'MEM_S': # STORE Rc, Ra (Mem[Rc] = Ra) -> Cuidado: PDF diz Store Rc, Ra => Mem[Rc] = Ra
+        decoded['Rs'] = rc # Endereço (Rc é usado como base)
+        decoded['Rt'] = ra # Dado a salvar (Ra)
+    
+    elif t == 'BRANCH': # BEQ Ra, Rb, End
+        # PDF: Opcode | Ra | Rb | End(8 bits)
+        decoded['Rs'] = ra
+        decoded['Rt'] = rb
+        decoded['Immediate'] = rc # Endereço curto (8 bits)
+
+    elif t == 'J_LINK': # JAL Endereço (24 bits)
+        # PDF: Opcode | Endereço (23-0)
+        addr = int(instruction_binary[8:32], 2)
+        decoded['Immediate'] = addr
+
+    elif t == 'J_REG': # JR Rc
+        # PDF: Opcode | ... | Rc
+        decoded['Rs'] = rc # Rc contém o endereço alvo
+
+    elif t == 'JUMP': # J Endereço
+        addr = int(instruction_binary[8:32], 2)
+        decoded['Immediate'] = addr
+
+    elif t == 'I_CUSTOM': # Suas instruções extras (ADDI...)
+        # Usaremos formato híbrido para caber imediato de 16 bits
+        # Opcode(8) | Rt(4) Rs(4) | Imm(16)
+        rt_custom = int(instruction_binary[8:12], 2)
+        rs_custom = int(instruction_binary[12:16], 2)
+        imm_custom = bin_to_int(instruction_binary[16:32])
+        decoded['Rt'] = rt_custom # Destino
+        decoded['Rs'] = rs_custom # Fonte
+        decoded['Immediate'] = imm_custom
 
     return decoded
