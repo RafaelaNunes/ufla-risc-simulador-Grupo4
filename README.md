@@ -42,16 +42,17 @@ git clone [https://github.com/usuario/ufla-risc-simulador-Grupo4.git](https://gi
 cd ufla-risc-simulador-Grupo4
 ```
 
-2. Executar o Simulador
-   O projeto possui um montador integrado que converte automaticamente os arquivos .asm da pasta exemplos para binário antes da execução.
+### 2. Executar o Simulador
 
-Opção 1: Menu Interativo (Recomendado) Execute sem argumentos para visualizar a lista de testes disponíveis:
+O projeto possui um montador integrado que converte automaticamente os arquivos .asm da pasta exemplos para binário antes da execução.
+
+**Opção 1:** Menu Interativo (Recomendado) Execute sem argumentos para visualizar a lista de testes disponíveis:
 
 ```bash
 python3 -m src.simulador.main
 ```
 
-Opção 2: Executar um arquivo específico Passe o caminho do arquivo Assembly como argumento:
+**Opção 2:** Executar um arquivo específico Passe o caminho do arquivo Assembly como argumento:
 
 ```bash
 python3 -m src.simulador.main exemplos/teste_hazard.asm
@@ -61,19 +62,19 @@ python3 -m src.simulador.main exemplos/teste_hazard.asm
 
 Os testes cobrem aritmética básica, acesso à memória e resolução de conflitos de pipeline . Os arquivos fonte estão na pasta exemplos/:
 
-teste_basico.asm: Soma e subtração básica.
+**teste_basico.asm:** Soma e subtração básica.
 
-teste_mul.asm: Multiplicação e divisão.
+**teste_mul.asm:** Multiplicação e divisão.
 
-teste_memoria.asm: Leitura e escrita (LW/SW) e manipulação de endereços.
+**teste_memoria.asm:** Leitura e escrita (LW/SW) e manipulação de endereços.
 
-teste_hazards.asm: Teste complexo de Forwarding, Stalls (Load-Use) e Jumps.
+**teste_hazards.asm:** Teste complexo de Forwarding, Stalls (Load-Use) e Jumps.
 
-teste_jump_to_branch.asm: Teste de fluxo de controle (Jump seguido de Branch).
+**teste_jump_to_branch.asm:** Teste de fluxo de controle (Jump seguido de Branch).
 
-teste_hazard_dados: Teste de Forwarding (adiantamento).
+**teste_hazard_dados:** Teste de Forwarding (adiantamento).
 
-teste_hazard_controle: Teste de fluxo de controle .
+**teste_hazard_controle:** Teste de fluxo de controle .
 
 Para rodar a bateria de testes, utilize o menu interativo descrito acima.
 
