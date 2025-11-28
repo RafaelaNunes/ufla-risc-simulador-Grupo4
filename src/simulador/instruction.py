@@ -98,7 +98,7 @@ def decode_instruction(instruction_binary: str) -> dict:
         if op_info['type'] == 'R':
             # Formato R: OP | Rd | Rs | Rt
             decoded['Rd'] = int(F1, 2)
-            decoded['Rt'] = int(F3, 2)
+            decoded['Rt'] = int(F3[0:4], 2)
         else: # I_ARITH, I_MEM
             # Formato I: OP | Rt | Rs | Imm
             decoded['Rt'] = int(F1, 2)

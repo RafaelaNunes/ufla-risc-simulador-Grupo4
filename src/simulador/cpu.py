@@ -67,7 +67,7 @@ class RegisterFile:
 
     def write(self, index: int, value: int):
         if index <= 0 or index >= len(self.registers): return
-        self.registers[index] = bin_to_int(format(value & 0xFFFFFFFF, '032b'))
+        self.registers[index] = value
 
 class PipelineRegister:
     """Classe base para os latches de pipeline."""
@@ -138,6 +138,9 @@ class CPU:
         '00010110': [0, 1, 0, 1, 0, 0, 0, 0, 0, ALU.R_TYPE_ALU_CODES['MUL']],  # MULI (22)
         '00010111': [0, 1, 0, 1, 0, 0, 0, 0, 0, ALU.R_TYPE_ALU_CODES['AND']],  # ANDI (23)
         '00011100': [0, 1, 0, 1, 0, 0, 0, 0, 0, ALU.R_TYPE_ALU_CODES['SLT']],  # SLTI (28)
+        '00000100': [1, 0, 0, 1, 0, 0, 0, 0, 0, ALU.R_TYPE_ALU_CODES['XOR']], # XOR
+        '00000101': [1, 0, 0, 1, 0, 0, 0, 0, 0, ALU.R_TYPE_ALU_CODES['OR']],  # OR
+        '00000111': [1, 0, 0, 1, 0, 0, 0, 0, 0, ALU.R_TYPE_ALU_CODES['AND']], # AND
         
         # I-CONST/I-MEM
         '00001110': [0, 1, 0, 1, 0, 0, 0, 0, 0, ALU.R_TYPE_ALU_CODES['COPY']], # LUI (14)
@@ -238,24 +241,61 @@ class CPU:
         return self.id_ex_latch.data
 
     def execute_and_memory_access(self, id_ex_latch: dict) -> dict:
-        """Estágio 3: Execução e Acesso à Memória (EX/MEM)"""
-        # ... (código execute_and_memory_access idêntico ao anterior)
         ctrl = id_ex_latch['Ctrl']
         
-       # if id_ex_latch['Mnemonic'] in ['HALT', 'NOP']:
-        #    self.ex_mem_latch.reset()
-         #   return self.ex_mem_latch.data
-
-        write_reg_addr = id_ex_latch['Rd'] if ctrl[0] == 1 else id_ex_latch['Rt']
+        # Obter endereços de registradores fonte para Forwarding
+        rs = id_ex_latch['Rs']
+        rt = id_ex_latch['Rt']
+        
+        # --- LÓGICA DE FORWARDING ---
         alu_input_a = id_ex_latch['Rs_Val']
-        alu_input_b = id_ex_latch['Immediate'] if ctrl[1] == 1 else id_ex_latch['Rt_Val']
+        alu_input_b = id_ex_latch['Rt_Val'] # Inicializa com o valor lido do Register File (Rs_Val / Rt_Val)
+
+
+
+        # 1. Forwarding da MEM/WB (Prioridade Média)
+        wb_write_reg = self.mem_wb_latch.data.get('Write_Reg_Addr', 0)
+        wb_reg_write = self.mem_wb_latch.data.get('Ctrl', [0]*10)[3]
+        
+        if wb_reg_write and wb_write_reg != 0:
+            data_to_fwd_wb = self.mem_wb_latch.data['Mem_Data'] if self.mem_wb_latch.data['Ctrl'][2] == 1 else self.mem_wb_latch.data['ALU_Result']
+
+            if rs == wb_write_reg:
+                alu_input_a = data_to_fwd_wb
+            if rt == wb_write_reg and ctrl[1] == 0: # Apenas se for R-Type
+                alu_input_b = data_to_fwd_wb
+
+        # 2. Forwarding da EX/MEM (Prioridade Alta)
+        ex_write_reg = self.ex_mem_latch.data.get('Write_Reg_Addr', 0)
+        ex_reg_write = self.ex_mem_latch.data.get('Ctrl', [0]*10)[3]
+        
+        if ex_reg_write and ex_write_reg != 0:
+            data_to_fwd_ex = self.ex_mem_latch.data['ALU_Result']
+
+            if rs == ex_write_reg:
+                alu_input_a = data_to_fwd_ex
+            if rt == ex_write_reg and ctrl[1] == 0: # Apenas se for R-Type
+                alu_input_b = data_to_fwd_ex
+                
+        # --- FIM DA LÓGICA DE FORWARDING ---
+        
+        write_reg_addr = id_ex_latch['Rd'] if ctrl[0] == 1 else id_ex_latch['Rt']
+        
+        # Seleção final do Operando B (Imediato vs Forwarded/Rt_Val)
+        if ctrl[1] == 1: # ALUSrc = 1 (I-Type/Imediato)
+             alu_input_b = id_ex_latch['Immediate']
+             
+        # ... (Restante do seu código)
         
         if id_ex_latch['Mnemonic'] == 'LUI':
             alu_result = id_ex_latch['Immediate'] << 16
         elif id_ex_latch['Mnemonic'] == 'LLI':
-             alu_result = id_ex_latch['Immediate']
+            alu_result = id_ex_latch['Immediate']
         else:
+            # Note que 'alu_input_a' e 'alu_input_b' já contêm o valor forwardeado ou o Rt_Val/Rs_Val original
             alu_result = ALU.execute(ctrl[9], alu_input_a, alu_input_b)
+        
+        # ... (Restante da função execute_and_memory_access)
         
         mem_data = 0
         if ctrl[4] == 1: # MemRead = 1 (LW)
@@ -296,26 +336,34 @@ class CPU:
         
     # src/simulador/cpu.py (NOVO MÉTODO)
     def check_for_data_hazard(self):
-        """
-        Verifica se a instrução no ID precisa do resultado da instrução 
-        que está atualmente no EX ou WB (apenas para stalls).
-        """
-        # Exemplo: Hazard entre ID (Lw/Sw/R-type) e EX (R-type/Lw)
-        
         # 1. Obter registradores Rs/Rt da instrução em ID
         id_rs = self.if_id_latch.data.get('Rs', -1)
         id_rt = self.if_id_latch.data.get('Rt', -1)
 
-        # 2. Obter endereço de escrita da instrução no EX
+        # 2. Obter endereço de escrita da instrução no EX (EX/MEM latch)
         ex_write_reg = self.ex_mem_latch.data.get('Write_Reg_Addr', -2)
-        ex_reg_write = self.ex_mem_latch.data.get('Ctrl', [0, 0, 0, 0, 0, 0, 0, 0, 0, 0])[3]
+        ex_reg_write = self.ex_mem_latch.data.get('Ctrl', [0]*10)[3]
         
-        # 3. Condição de Stall CRÍTICA (RAW Hazard)
-        # A instrução em ID precisa de um registrador que será escrito pela instrução em EX.
+        # 3. Obter endereço de escrita da instrução no WB (MEM/WB latch)
+        wb_write_reg = self.mem_wb_latch.data.get('Write_Reg_Addr', -3)
+        wb_reg_write = self.mem_wb_latch.data.get('Ctrl', [0]*10)[3]
+
+        # Condição de Stall CRÍTICA (RAW Hazard)
+        
+        # Hazard 1: ID precisa de resultado que está em EX
         if ex_reg_write and ex_write_reg > 0:
             if ex_write_reg == id_rs or ex_write_reg == id_rt:
-                return True  # STALL NECESSÁRIO
+                # O NOP de um ciclo não basta para LW, mas resolve ALU-ALU. 
+                # Se for LW no EX, o Stall precisa ser maior. Mas para o ADD resolve.
+                return True
         
+        # Hazard 2: ID precisa de resultado que está em MEM (ainda não escrito!)
+        # Se a instrução em MEM for uma escrita de registrador, precisamos de stall.
+        # Isso é redundante se você tiver Forwarding, mas essencial para Stalls puras.
+        if wb_reg_write and wb_write_reg > 0:
+            if wb_write_reg == id_rs or wb_write_reg == id_rt:
+                return True
+
         return False
 
     def step(self):
