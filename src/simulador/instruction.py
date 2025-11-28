@@ -36,8 +36,6 @@ def reg_to_bin(reg_str: str) -> str:
 # ====================================================================
 # MAPA DE OPCODES E DECODIFICAÇÃO
 # ====================================================================
-# Mantive os opcodes já existentes e adicionei os novos para controle.
-# Escolhi códigos não usados anteriormente.
 OPCODE_MAP = {
     # R-Type (existentes)
     '00000001': {'name': 'ADD', 'type': 'R'},
@@ -52,8 +50,8 @@ OPCODE_MAP = {
     '00001010': {'name': 'SLL', 'type': 'R'},
     '00001011': {'name': 'SRL', 'type': 'R'},
     '00001100': {'name': 'COPY', 'type': 'R'},
-    # novos R
-    '00001101': {'name': 'JR', 'type': 'R'},   # JR (usará campo Rs para registrar alvo)
+    # JR
+    '00001101': {'name': 'JR', 'type': 'R'},
 
     # R-type extras
     '00010100': {'name': 'MUL', 'type': 'R'},
@@ -67,7 +65,7 @@ OPCODE_MAP = {
     '00010111': {'name': 'ANDI', 'type': 'I_ARITH'},
     '00011100': {'name': 'SLTI', 'type': 'I_ARITH'},
 
-    # Logical R-types
+    # Logical R-types (duplicated codes handled already)
     '00000101': {'name': 'OR', 'type': 'R'},
     '00000111': {'name': 'AND', 'type': 'R'},
 
@@ -78,14 +76,15 @@ OPCODE_MAP = {
     '00010001': {'name': 'SW', 'type': 'I_MEM'},
 
     # CONTROLE (novas instruções de salto/branch)
-    # JEQ: jump if equal (I-style: Rt, Rs, Imm)
+    # JEQ: jump if equal (I-style: Rt, Rs, Imm)  -- we'll store Immediate as UNSIGNED 16-bit (absolute byte addr)
     '00011101': {'name': 'JEQ', 'type': 'I_BRANCH'},
     # JNE: jump if not equal
     '00011110': {'name': 'JNE', 'type': 'I_BRANCH'},
     # J: jump absolute (imm target)
     '00011111': {'name': 'J', 'type': 'I_BRANCH'},
-    # JAL: jump and link (salva o PC+1 em R15)
+    # JAL: jump and link (salva o PC_word+1 em R15)
     '00100000': {'name': 'JAL', 'type': 'I_BRANCH'},
+
     # HALT / NOP
     '11111111': {'name': 'HALT', 'type': 'HALT'},
     '00000000': {'name': 'NOP', 'type': 'NOP'}
@@ -104,6 +103,7 @@ def decode_instruction(instruction_binary: str) -> dict:
 
     decoded = {'Opcode': opcode, 'Mnemonic': op_info['name'], 'Type': op_info['type']}
 
+    # Campos comuns: F1(8:12), F2(12:16), F3(16:32)
     if op_info['type'] in ['R', 'I_ARITH', 'I_MEM', 'I_BRANCH']:
         F1 = instruction_binary[8:12]   # Rd (R) ou Rt (I)
         F2 = instruction_binary[12:16]  # Rs
@@ -116,16 +116,21 @@ def decode_instruction(instruction_binary: str) -> dict:
             decoded['Rd'] = int(F1, 2)
             decoded['Rt'] = int(F3[0:4], 2)
         else:
-            # I_ARITH, I_MEM, I_BRANCH: OP | Rt(4) | Rs(4) | Imm(16)
-            decoded['Rt'] = int(F1, 2)
-            # imediato de 16 bits (com sinal)
-            decoded['Immediate'] = bin_to_int(F3)
+            # I_ARITH, I_MEM: immediate é signed (ex.: offsets)
+            if op_info['type'] in ['I_ARITH', 'I_MEM']:
+                decoded['Rt'] = int(F1, 2)
+                # Imediato de 16 bits com sinal
+                decoded['Immediate'] = bin_to_int(F3)
+            else:
+                # I_BRANCH: Immediate é endereço absoluto de 16 bits (UNSIGNED)
+                decoded['Rt'] = int(F1, 2)
+                decoded['Immediate'] = int(F3, 2)
 
     elif op_info['type'] == 'I_CONST':
         # OP | Rt(4) | Imm_H(8) | Imm_L(8)
         F1 = instruction_binary[8:12]  # Rt
         F2 = instruction_binary[12:20]  # Imm_H (8)
-        F3 = instruction_binary[20:28]  # Imm_L (8) -- decode original usava 12bits, mas adaptamos
+        F3 = instruction_binary[20:28]  # Imm_L (8)
         decoded['Rt'] = int(F1, 2)
         imm_16 = F2 + F3  # 16 bits
         decoded['Immediate'] = int(imm_16, 2)
