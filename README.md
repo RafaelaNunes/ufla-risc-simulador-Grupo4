@@ -38,21 +38,27 @@ Além do conjunto base (22 instruções), foram implementadas as seguintes instr
 
 ```bash
 git clone [https://github.com/usuario/ufla-risc-simulador-Grupo4.git](https://github.com/usuario/ufla-risc-simulador-Grupo4.git)
+
 cd ufla-risc-simulador-Grupo4
+```
+
 2. Executar o Simulador
-O projeto possui um montador integrado que converte automaticamente os arquivos .asm da pasta exemplos para binário antes da execução.
+   O projeto possui um montador integrado que converte automaticamente os arquivos .asm da pasta exemplos para binário antes da execução.
 
-Opção A: Menu Interativo (Recomendado) Execute sem argumentos para visualizar a lista de testes disponíveis:
+Opção 1: Menu Interativo (Recomendado) Execute sem argumentos para visualizar a lista de testes disponíveis:
 
-Bash
-
+```bash
 python3 -m src.simulador.main
-Opção B: Executar um arquivo específico Passe o caminho do arquivo Assembly como argumento:
+```
 
-Bash
+Opção 2: Executar um arquivo específico Passe o caminho do arquivo Assembly como argumento:
 
+```bash
 python3 -m src.simulador.main exemplos/teste_hazard.asm
-Testes Realizados
+```
+
+## Testes Realizados
+
 Os testes cobrem aritmética básica, acesso à memória e resolução de conflitos de pipeline . Os arquivos fonte estão na pasta exemplos/:
 
 teste_basico.asm: Soma e subtração básica.
@@ -71,6 +77,6 @@ teste_hazard_controle: Teste de fluxo de controle .
 
 Para rodar a bateria de testes, utilize o menu interativo descrito acima.
 
-Licença
+## Licença
+
 Projeto acadêmico sem licença comercial.
-```
