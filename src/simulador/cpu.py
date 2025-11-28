@@ -1,8 +1,5 @@
-# src/simulador/cpu.py
-
 from .instruction import decode_instruction, bin_to_int
 
-# ----------------------- helpers de impressão -----------------------
 def print_registers(reg_file):
     print("-----------------------------------------")
     for i in range(0, 32, 4):
@@ -23,7 +20,6 @@ def print_memory_data(data_memory, limit_words=4):
     print("-----------------------------------------")
 
 
-# ----------------------- estruturas -----------------------
 class DataMemory:
     def __init__(self, initial_data_list: list = None):
         self.memory = initial_data_list if initial_data_list is not None else [0] * 1024
@@ -111,7 +107,6 @@ class ALU:
 # ----------------------- CPU -----------------------
 class CPU:
     CONTROL_TABLE = {
-        # R-Type Padrão
         '00000001': [1,0,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['ADD']], 
         '00000010': [1,0,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['SUB']],
         '00001100': [1,0,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['COPY']], 
@@ -119,33 +114,27 @@ class CPU:
         '00000101': [1,0,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['OR']],
         '00000111': [1,0,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['AND']],
         
-        # NOVAS R-Type
         '00010111': [1,0,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['MUL']], 
         '00011000': [1,0,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['DIV']], 
         '00011001': [1,0,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['NOR']], 
 
-        # I-CUSTOM (ADDI, SUBI...)
         '00011010': [0,1,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['ADD']], 
         '00011011': [0,1,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['SUB']], 
         '00011100': [0,1,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['MUL']], 
         '00011101': [0,1,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['AND']], 
         '00011110': [0,1,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['SLT']], 
 
-        # I-CONST / I-MEM
-        # FIX: O primeiro bit (RegDst) deve ser 1 para LUI, LLI e LW
-        '00001110': [1,1,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['COPY']], # LUI
-        '00001111': [1,1,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['COPY']], # LLI
-        '00010000': [1,1,1,1,1,0,0,0,0, ALU.R_TYPE_ALU_CODES['ADD']], # LW
-        '00010001': [0,1,0,0,0,1,0,0,0, ALU.R_TYPE_ALU_CODES['ADD']], # SW
+        '00001110': [1,1,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['COPY']],
+        '00001111': [1,1,0,1,0,0,0,0,0, ALU.R_TYPE_ALU_CODES['COPY']],
+        '00010000': [1,1,1,1,1,0,0,0,0, ALU.R_TYPE_ALU_CODES['ADD']],
+        '00010001': [0,1,0,0,0,1,0,0,0, ALU.R_TYPE_ALU_CODES['ADD']],
 
-        # Controle de Fluxo
-        '00010100': [0,0,0,0,0,0,1,0,0,0],  # BEQ
-        '00010101': [0,0,0,0,0,0,1,0,0,0],  # BNE
-        '00010110': [0,0,0,0,0,0,0,0,0,0],  # J
-        '00010010': [0,0,0,1,0,0,0,0,0,0],  # JAL
-        '00010011': [0,0,0,0,0,0,0,0,0,0],  # JR
+        '00010100': [0,0,0,0,0,0,1,0,0,0],
+        '00010101': [0,0,0,0,0,0,1,0,0,0],
+        '00010110': [0,0,0,0,0,0,0,0,0,0],
+        '00010010': [0,0,0,1,0,0,0,0,0,0],
+        '00010011': [0,0,0,0,0,0,0,0,0,0],
 
-        # HALT / NOP
         '11111111': [0,0,0,0,0,0,0,0,0,0],
         '00000000': [0,0,0,0,0,0,0,0,0,0]
     }
@@ -235,7 +224,6 @@ class CPU:
         ctrl = id_ex_latch.get('Ctrl', [0]*10)
         mnemonic = id_ex_latch.get('Mnemonic', 'NOP')
 
-        # RegDst (bit 0): Se 1 usa Rd, se 0 usa Rt
         write_reg_addr = id_ex_latch.get('Rd') if ctrl[0] == 1 else id_ex_latch.get('Rt')
 
         rs = id_ex_latch.get('Rs', 0)
