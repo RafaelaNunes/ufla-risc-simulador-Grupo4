@@ -337,10 +337,10 @@ class CPU:
         return False
 
     def step(self):
-        # 1) WRITE BACK: usa mem_wb_latch atual (conteúdo do ciclo anterior)
+     
         self.write_back(self.mem_wb_latch.data)
 
-        # 2) EXECUTE: computa resultado a partir do id_ex_latch atual (não comita ainda)
+    
         ex_result = self.execute_and_memory_access(self.id_ex_latch.data)
         next_ex_mem = PipelineRegister()
         next_ex_mem.data.update(ex_result)
@@ -353,19 +353,19 @@ class CPU:
         next_id_ex = PipelineRegister()
 
         if stall:
-            # inserir bolha em ID/EX e manter IF/ID (não buscar nova instrução)
+          
             next_id_ex.reset()
             next_if_id.data.update(self.if_id_latch.data)
         else:
-            # decodifica a instrução atual no IF/ID e prepara ID/EX
+          
             id_out = self.decode(self.if_id_latch.data)
             next_id_ex.data.update(id_out)
-            # busca próxima instrução (escreve temporariamente em self.if_id_latch)
+          
             self.fetch()
-            # copia o IF/ID (que pode ter sido atualizado por fetch) para next_if_id
+         
             next_if_id.data.update(self.if_id_latch.data)
 
-        # 5) se EX indicou salto, aplicar e flushar IF/ID e ID/EX
+        
         if ex_result.get('JumpTaken', False):
             next_pc = ex_result.get('NextPC')
             if next_pc is not None:
@@ -373,22 +373,15 @@ class CPU:
             next_if_id.reset()
             next_id_ex.reset()
 
-        # ===== CORREÇÃO CRÍTICA AQUI: MEM/WB deve receber o EX/MEM anterior =====
+        
         next_mem_wb = PipelineRegister()
-        # mem_wb (próximo) deve receber o conteúdo que está atualmente em self.ex_mem_latch
-        # (ou seja, a instrução que já estava em EX/MEM desde o ciclo anterior).
         next_mem_wb.data.update(self.ex_mem_latch.data)
-
-        # 6) Comitar latches (todas atualizações ao mesmo tempo)
-        # ex_mem <- resultado do EX atual
-        self.ex_mem_latch.data.update(next_ex_mem.data)
-        # mem_wb <- conteúdo anterior de ex_mem (armazenado em next_mem_wb)
+        self.ex_mem_latch.data.update(next_ex_mem.data)    
         self.mem_wb_latch.data.update(next_mem_wb.data)
-        # IF/ID e ID/EX
         self.if_id_latch.data.update(next_if_id.data)
         self.id_ex_latch.data.update(next_id_ex.data)
 
-        # 7) incrementar clock
+      
         self.clock_cycle += 1
 
 
